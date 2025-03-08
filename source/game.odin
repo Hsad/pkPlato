@@ -62,6 +62,7 @@ ui_camera :: proc() -> rl.Camera2D {
 update :: proc() {
 	input: rl.Vector2
 
+	// Keyboard input
 	if rl.IsKeyDown(.UP) || rl.IsKeyDown(.W) {
 		input.y -= 1
 	}
@@ -73,6 +74,35 @@ update :: proc() {
 	}
 	if rl.IsKeyDown(.RIGHT) || rl.IsKeyDown(.D) {
 		input.x += 1
+	}
+
+	// Gamepad input (using first connected gamepad)
+	if rl.IsGamepadAvailable(0) {
+		// Left analog stick
+		x := rl.GetGamepadAxisMovement(0, .LEFT_X)
+		y := rl.GetGamepadAxisMovement(0, .LEFT_Y)
+		
+		// Apply deadzone of 0.2 to handle controller drift
+		if abs(x) > 0.2 {
+			input.x += x
+		}
+		if abs(y) > 0.2 {
+			input.y += y 
+		}
+
+		// D-pad
+		if rl.IsGamepadButtonDown(0, .LEFT_FACE_UP) {
+			input.y -= 1
+		}
+		if rl.IsGamepadButtonDown(0, .LEFT_FACE_DOWN) {
+			input.y += 1
+		}
+		if rl.IsGamepadButtonDown(0, .LEFT_FACE_LEFT) {
+			input.x -= 1
+		}
+		if rl.IsGamepadButtonDown(0, .LEFT_FACE_RIGHT) {
+			input.x += 1
+		}
 	}
 
 	input = linalg.normalize0(input)
@@ -90,7 +120,7 @@ draw :: proc() {
 
 	rl.BeginMode2D(game_camera())
 	rl.DrawTextureEx(g_mem.player_texture, g_mem.player_pos, 0, 1, rl.WHITE)
-	rl.DrawRectangleV({20, 20}, {10, 10}, rl.RED)
+	rl.DrawRectangleV({20, 20}, {10, 10}, rl.BLUE)
 	rl.DrawRectangleV({-30, -20}, {10, 10}, rl.GREEN)
 	rl.EndMode2D()
 

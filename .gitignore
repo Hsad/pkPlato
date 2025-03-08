@@ -4,3 +4,15 @@ game_hot_reload.exe
 game_hot_reload.bin
 raylib.dll
 linux/**
+
+main_hot_reload.exe
+main_hot_reload.bin
+main_hot_reload
+
+main_release.exe
+main_release.bin
+main_release
+
+main_debug.exe
+main_debug.bin
+main_debug
