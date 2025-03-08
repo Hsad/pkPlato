@@ -34,13 +34,18 @@ import rl "vendor:raylib"
 
 PIXEL_WINDOW_HEIGHT :: 180
 
+Debug_data :: struct {
+	ideal_camera_pos: rl.Vector3,
+}
+
 Game_Memory :: struct {
 	player_pos: rl.Vector3,
 	player_texture: rl.Texture,
 	camera_pos: rl.Vector3,
-	player_facing: rl.Vector3,
+	player_look_target: rl.Vector3,
 	some_number: int,
 	run: bool,
+	debug: Debug_data,
 }
 
 g_mem: ^Game_Memory
@@ -73,8 +78,17 @@ update :: proc() {
 
 		// Apply deadzone of 0.3 to handle controller drift
 		if abs(x) > 0.3 || abs(z) > 0.3 {
-			input += g_mem.player_facing * -z
-			input -= {g_mem.player_facing.z, 0, -g_mem.player_facing.x} * x * 0.2
+			// Calculate direction vector from player to look target, projected onto xz plane
+			look_dir := g_mem.player_look_target - g_mem.player_pos
+			look_dir.y = 0 // Project onto xz plane
+			look_dir = linalg.normalize(look_dir)
+			
+			// Forward/backward movement along look direction on xz plane
+			input += look_dir * -z
+			
+			// Strafe movement perpendicular to look direction on xz plane
+			right_dir := rl.Vector3{look_dir.z, 0, -look_dir.x}
+			input -= right_dir * x * 0.2
 		}
 
 		// Right analog stick for looking
@@ -85,40 +99,42 @@ update :: proc() {
 		LOOK_DEADZONE :: 0.3
 		LOOK_SENSITIVITY :: 2.0
 		if abs(look_x) > LOOK_DEADZONE || abs(look_y) > LOOK_DEADZONE {
-			// Calculate rotation angle based on right stick input
+			LOOK_DISTANCE :: 10.0  // Distance to keep the look target from player
+			
+			// Rotate the look target around the player
+			current_target_offset := g_mem.player_look_target - g_mem.player_pos
 			yaw := look_x * LOOK_SENSITIVITY * rl.GetFrameTime()
-			//pitch := look_y * LOOK_SENSITIVITY * rl.GetFrameTime()
-
-			// Rotate facing direction around Y axis (left/right)
+			
 			cos_yaw := math.cos(yaw)
 			sin_yaw := math.sin(yaw)
-			g_mem.player_facing = {
-				g_mem.player_facing.x * cos_yaw - g_mem.player_facing.z * sin_yaw,
-				g_mem.player_facing.y,
-				g_mem.player_facing.x * sin_yaw + g_mem.player_facing.z * cos_yaw,
+			new_offset := rl.Vector3{
+				current_target_offset.x * cos_yaw - current_target_offset.z * sin_yaw,
+				current_target_offset.y,
+				current_target_offset.x * sin_yaw + current_target_offset.z * cos_yaw,
 			}
-
-			// Normalize to maintain unit vector
-			g_mem.player_facing = linalg.normalize(g_mem.player_facing)
+			
+			// Maintain consistent distance from player
+			g_mem.player_look_target = g_mem.player_pos + linalg.normalize(new_offset) * LOOK_DISTANCE
 		}
 	}
 	if rl.IsKeyDown(.UP) || rl.IsKeyDown(.W) {
-		input += g_mem.player_facing
+		input += g_mem.player_look_target
 	}
 	if rl.IsKeyDown(.DOWN) || rl.IsKeyDown(.S) {
-		input -= g_mem.player_facing
+		input -= g_mem.player_look_target
 	}
 	if rl.IsKeyDown(.LEFT) || rl.IsKeyDown(.A) {
-		input += {g_mem.player_facing.z, 0, -g_mem.player_facing.x}
+		input += {g_mem.player_look_target.z, 0, -g_mem.player_look_target.x}
 	}
 	if rl.IsKeyDown(.RIGHT) || rl.IsKeyDown(.D) {
-		input -= {g_mem.player_facing.z, 0, -g_mem.player_facing.x}
+		input -= {g_mem.player_look_target.z, 0, -g_mem.player_look_target.x}
 	}
 	
 
 	//input = linalg.normalize0(input)
 	
 	g_mem.player_pos += input * rl.GetFrameTime() * 100
+	g_mem.player_look_target += input * rl.GetFrameTime() * 100
 	
 	// Calculate ideal camera position within an angle behind the player
 	MAX_ANGLE :f32 = 45.0 // Maximum angle deviation from directly behind (in degrees)
@@ -129,7 +145,7 @@ update :: proc() {
 	current_offset := g_mem.camera_pos - g_mem.player_pos
 	
 	// Calculate ideal camera position based on player facing
-	target_angle := math.atan2(-g_mem.player_facing.x, -g_mem.player_facing.z)
+	target_angle := math.atan2(-g_mem.player_look_target.x, -g_mem.player_look_target.z)
 	
 	// Get current horizontal angle of camera
 	current_angle := math.atan2(current_offset.x, current_offset.z)
@@ -149,7 +165,7 @@ update :: proc() {
 	}
 	
 	// Smoothly interpolate camera position
-	camera_smoothing :f32= 5.0
+	camera_smoothing :f32= 1.0
 	g_mem.camera_pos = linalg.lerp(
 		g_mem.camera_pos,
 		ideal_camera_pos,
@@ -157,6 +173,8 @@ update :: proc() {
 	)
 	
 	g_mem.some_number += 1
+
+	g_mem.debug.ideal_camera_pos = ideal_camera_pos
 
 	//if rl.IsKeyPressed(.ESCAPE) {
 	//	g_mem.run = false
@@ -170,8 +188,13 @@ draw :: proc() {
 	rl.BeginMode3D(game_camera())
 
 	rl.DrawSphere(g_mem.player_pos, 1.0, rl.BLUE)
-	rl.DrawPlane({0, -1, 0}, {10, 10}, rl.GRAY) // Center at y=-1, 10x10 size
-	rl.DrawLine3D(g_mem.player_pos, g_mem.player_pos + g_mem.player_facing * 10, rl.RED)
+	rl.DrawPlane({0, -1, 0}, {100, 100}, rl.GRAY) // Center at y=-1, 10x10 size
+	rl.DrawLine3D(g_mem.player_pos, g_mem.player_look_target, rl.YELLOW)
+	rl.DrawSphere(g_mem.debug.ideal_camera_pos, 0.3, rl.GREEN)
+	rl.DrawLine3D(g_mem.player_pos, g_mem.debug.ideal_camera_pos, rl.GREEN)
+	
+	// Draw the look target as a small yellow sphere
+	rl.DrawSphere(g_mem.player_look_target, 0.3, rl.YELLOW)
 	
 	rl.EndMode3D()
 
@@ -184,7 +207,7 @@ draw :: proc() {
 	})
 	rl.DrawSphere(g_mem.player_pos, 1.0, rl.RED)
 	rl.DrawPlane({0, -1, 0}, {10, 10}, rl.GREEN) // Center at y=-1, 10x10 size
-	rl.DrawLine3D(g_mem.player_pos, g_mem.player_pos + g_mem.player_facing * 10, rl.RED)
+	rl.DrawLine3D(g_mem.player_pos, g_mem.player_look_target, rl.RED)
 	rl.EndMode3D()
 
 	rl.BeginMode2D(ui_camera())
@@ -225,6 +248,7 @@ game_init :: proc() {
 		// You can put textures, sounds and music in the `assets` folder. Those
 		// files will be part any release or web build.
 		player_texture = rl.LoadTexture("assets/round_cat.png"),
+		player_look_target = {10, 0, 0},  // Initialize some distance in front of default spawn
 	}
 
 	game_hot_reloaded(g_mem)
