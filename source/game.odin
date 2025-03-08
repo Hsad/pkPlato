@@ -72,12 +72,60 @@ update :: proc() {
 
 	// Gamepad input (using first connected gamepad)
 	if rl.IsGamepadAvailable(0) {
+
+		// Right analog stick for looking
+		look_x := rl.GetGamepadAxisMovement(0, .RIGHT_X)
+		look_y := rl.GetGamepadAxisMovement(0, .RIGHT_Y)
+
+		// Apply deadzone and sensitivity
+		LOOK_DEADZONE :: 0.3
+		LOOK_SENSITIVITY :: 2.0
+		LOOK_DISTANCE :: 10.0  // Distance to keep the look target from player
+
+		is_looking := abs(look_x) > LOOK_DEADZONE || abs(look_y) > LOOK_DEADZONE
+		if is_looking {
+			
+			// Rotate the look target around the player
+			current_target_offset := g_mem.player_look_target - g_mem.player_pos
+			yaw := look_x * LOOK_SENSITIVITY * rl.GetFrameTime()
+			
+			// Apply horizontal rotation (yaw)
+			cos_yaw := math.cos(yaw)
+			sin_yaw := math.sin(yaw)
+			new_offset := rl.Vector3{
+				current_target_offset.x * cos_yaw - current_target_offset.z * sin_yaw,
+				current_target_offset.y,
+				current_target_offset.x * sin_yaw + current_target_offset.z * cos_yaw,
+			}
+			
+			// Apply vertical look (pitch)
+			VERTICAL_SENSITIVITY :: 1.0
+			MAX_VERTICAL_ANGLE :: math.PI * 0.4 // Limit vertical look to about 72 degrees up/down
+			
+			// Calculate current vertical angle
+			horizontal_dist := math.sqrt(new_offset.x * new_offset.x + new_offset.z * new_offset.z)
+			current_angle := math.atan2(new_offset.y, horizontal_dist)
+			
+			// If actively looking up/down with stick, allow vertical movement
+			if abs(look_y) > LOOK_DEADZONE {
+				new_angle := current_angle + look_y * VERTICAL_SENSITIVITY * rl.GetFrameTime()
+				current_angle = clamp(new_angle, -MAX_VERTICAL_ANGLE, MAX_VERTICAL_ANGLE)
+			} 
+			
+			// Calculate new height using angle
+			new_offset.y = horizontal_dist * math.tan(current_angle)
+			
+			// Maintain consistent distance from player
+			g_mem.player_look_target = g_mem.player_pos + linalg.normalize(new_offset) * LOOK_DISTANCE
+		}
+
 		// Left analog stick movement (existing code)
 		x := rl.GetGamepadAxisMovement(0, .LEFT_X)
 		z := rl.GetGamepadAxisMovement(0, .LEFT_Y)
 
 		// Apply deadzone of 0.3 to handle controller drift
-		if abs(x) > 0.3 || abs(z) > 0.3 {
+		is_moving := abs(x) > 0.3 || abs(z) > 0.3
+		if is_moving {
 			// Calculate direction vector from player to look target, projected onto xz plane
 			look_dir := g_mem.player_look_target - g_mem.player_pos
 			look_dir.y = 0 // Project onto xz plane
@@ -90,32 +138,33 @@ update :: proc() {
 			right_dir := rl.Vector3{look_dir.z, 0, -look_dir.x}
 			input -= right_dir * x * 0.2
 		}
-
-		// Right analog stick for looking
-		look_x := rl.GetGamepadAxisMovement(0, .RIGHT_X)
-		look_y := rl.GetGamepadAxisMovement(0, .RIGHT_Y)
-
-		// Apply deadzone and sensitivity
-		LOOK_DEADZONE :: 0.3
-		LOOK_SENSITIVITY :: 2.0
-		if abs(look_x) > LOOK_DEADZONE || abs(look_y) > LOOK_DEADZONE {
-			LOOK_DISTANCE :: 10.0  // Distance to keep the look target from player
+		// adjust vertical look back to center while moving
+		if is_moving && !is_looking {
+			RETURN_TO_LEVEL_SPEED :: 2.0 // Speed at which view returns to level
 			
-			// Rotate the look target around the player
-			current_target_offset := g_mem.player_look_target - g_mem.player_pos
-			yaw := look_x * LOOK_SENSITIVITY * rl.GetFrameTime()
+			// Get current offset and recalculate angle
+			current_offset := g_mem.player_look_target - g_mem.player_pos
+			horizontal_dist := math.sqrt(current_offset.x * current_offset.x + current_offset.z * current_offset.z)
+			current_angle := math.atan2(current_offset.y, horizontal_dist)
 			
-			cos_yaw := math.cos(yaw)
-			sin_yaw := math.sin(yaw)
+			// Lerp the angle back to 0
+			new_angle := linalg.lerp(
+				current_angle,
+				0.0,
+				min(1.0, rl.GetFrameTime() * RETURN_TO_LEVEL_SPEED),
+			)
+			
+			// Construct new offset with updated height
 			new_offset := rl.Vector3{
-				current_target_offset.x * cos_yaw - current_target_offset.z * sin_yaw,
-				current_target_offset.y,
-				current_target_offset.x * sin_yaw + current_target_offset.z * cos_yaw,
+				current_offset.x,
+				horizontal_dist * math.tan(new_angle),
+				current_offset.z,
 			}
 			
 			// Maintain consistent distance from player
 			g_mem.player_look_target = g_mem.player_pos + linalg.normalize(new_offset) * LOOK_DISTANCE
 		}
+
 	}
 	if rl.IsKeyDown(.UP) || rl.IsKeyDown(.W) {
 		input += g_mem.player_look_target
@@ -131,49 +180,51 @@ update :: proc() {
 	}
 	
 
-	//input = linalg.normalize0(input)
 	
 	g_mem.player_pos += input * rl.GetFrameTime() * 100
 	g_mem.player_look_target += input * rl.GetFrameTime() * 100
 	
-	// Calculate ideal camera position within an angle behind the player
-	MAX_ANGLE :f32 = 45.0 // Maximum angle deviation from directly behind (in degrees)
+	// Camera constants
 	CAMERA_DISTANCE :f32 = 20.0
 	CAMERA_HEIGHT :f32 = 10.0
+	HORIZONTAL_SMOOTHING :f32: 5.0 // Faster horizontal movement
+	VERTICAL_SMOOTHING :f32: 5.0  // Slower vertical movement
 	
-	// Get current camera offset (relative to player)
-	current_offset := g_mem.camera_pos - g_mem.player_pos
+	// Get direction from player to look target
+	look_dir := linalg.normalize(g_mem.player_look_target - g_mem.player_pos)
 	
-	// Calculate ideal camera position based on player facing
-	target_angle := math.atan2(-g_mem.player_look_target.x, -g_mem.player_look_target.z)
+	// Calculate ideal camera position on opposite side of player from look target
+	base_camera_pos := g_mem.player_pos - look_dir * CAMERA_DISTANCE
 	
-	// Get current horizontal angle of camera
-	current_angle := math.atan2(current_offset.x, current_offset.z)
+	// Add height offset inversely proportional to look target height
+	vertical_offset := CAMERA_HEIGHT * (1.0 - look_dir.y)
+	ideal_camera_pos := base_camera_pos + rl.Vector3{0, vertical_offset, 0}
 	
-	// Calculate shortest angle difference and clamp to max allowed
-	angle_diff := math.angle_diff(current_angle, target_angle)
-	clamped_diff := math.clamp(angle_diff, -math.to_radians(MAX_ANGLE), math.to_radians(MAX_ANGLE))
+	// Split current and target positions into horizontal and vertical components
+	current_horizontal := rl.Vector3{g_mem.camera_pos.x, 0, g_mem.camera_pos.z}
+	current_vertical := rl.Vector3{0, g_mem.camera_pos.y, 0}
 	
-	// Calculate final camera angle by adding clamped difference to target
-	final_angle :f32= target_angle + clamped_diff
+	target_horizontal := rl.Vector3{ideal_camera_pos.x, 0, ideal_camera_pos.z}
+	target_vertical := rl.Vector3{0, ideal_camera_pos.y, 0}
 	
-	// Calculate ideal camera position using final angle
-	ideal_camera_pos := g_mem.player_pos + rl.Vector3{
-		math.sin(final_angle) * CAMERA_DISTANCE,
-		CAMERA_HEIGHT,
-		math.cos(final_angle) * CAMERA_DISTANCE,
-	}
-	
-	// Smoothly interpolate camera position
-	camera_smoothing :f32= 1.0
-	g_mem.camera_pos = linalg.lerp(
-		g_mem.camera_pos,
-		ideal_camera_pos,
-		min(1.0, rl.GetFrameTime() * camera_smoothing),
+	// Lerp horizontal and vertical components separately with different smoothing
+	new_horizontal := linalg.lerp(
+		current_horizontal,
+		target_horizontal,
+		min(1.0, rl.GetFrameTime() * HORIZONTAL_SMOOTHING),
 	)
 	
+	new_vertical := linalg.lerp(
+		current_vertical,
+		target_vertical,
+		min(1.0, rl.GetFrameTime() * VERTICAL_SMOOTHING),
+	)
+	
+	// Combine components for final camera position
+	g_mem.camera_pos = new_horizontal + new_vertical
+	
 	g_mem.some_number += 1
-
+	
 	g_mem.debug.ideal_camera_pos = ideal_camera_pos
 
 	//if rl.IsKeyPressed(.ESCAPE) {
