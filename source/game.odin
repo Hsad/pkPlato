@@ -29,27 +29,30 @@ package game
 
 import "core:fmt"
 import "core:math/linalg"
+import "core:math"
 import rl "vendor:raylib"
 
 PIXEL_WINDOW_HEIGHT :: 180
 
 Game_Memory :: struct {
-	player_pos: rl.Vector2,
+	player_pos: rl.Vector3,
 	player_texture: rl.Texture,
+	camera_pos: rl.Vector3,
+	player_facing: rl.Vector3,
 	some_number: int,
 	run: bool,
 }
 
 g_mem: ^Game_Memory
 
-game_camera :: proc() -> rl.Camera2D {
-	w := f32(rl.GetScreenWidth())
-	h := f32(rl.GetScreenHeight())
+game_camera :: proc() -> rl.Camera3D {
 
 	return {
-		zoom = h/PIXEL_WINDOW_HEIGHT,
+		position = g_mem.camera_pos,
 		target = g_mem.player_pos,
-		offset = { w/2, h/2 },
+		up = {0, 1, 0},
+		fovy = 45,
+		projection = .PERSPECTIVE,
 	}
 }
 
@@ -60,69 +63,129 @@ ui_camera :: proc() -> rl.Camera2D {
 }
 
 update :: proc() {
-	input: rl.Vector2
-
-	// Keyboard input
-	if rl.IsKeyDown(.UP) || rl.IsKeyDown(.W) {
-		input.y -= 1
-	}
-	if rl.IsKeyDown(.DOWN) || rl.IsKeyDown(.S) {
-		input.y += 1
-	}
-	if rl.IsKeyDown(.LEFT) || rl.IsKeyDown(.A) {
-		input.x -= 1
-	}
-	if rl.IsKeyDown(.RIGHT) || rl.IsKeyDown(.D) {
-		input.x += 1
-	}
+	input: rl.Vector3
 
 	// Gamepad input (using first connected gamepad)
 	if rl.IsGamepadAvailable(0) {
-		// Left analog stick
+		// Left analog stick movement (existing code)
 		x := rl.GetGamepadAxisMovement(0, .LEFT_X)
-		y := rl.GetGamepadAxisMovement(0, .LEFT_Y)
-		
-		// Apply deadzone of 0.2 to handle controller drift
-		if abs(x) > 0.2 {
-			input.x += x
-		}
-		if abs(y) > 0.2 {
-			input.y += y 
+		z := rl.GetGamepadAxisMovement(0, .LEFT_Y)
+
+		// Apply deadzone of 0.3 to handle controller drift
+		if abs(x) > 0.3 || abs(z) > 0.3 {
+			input += g_mem.player_facing * -z
+			input -= {g_mem.player_facing.z, 0, -g_mem.player_facing.x} * x * 0.2
 		}
 
-		// D-pad
-		if rl.IsGamepadButtonDown(0, .LEFT_FACE_UP) {
-			input.y -= 1
-		}
-		if rl.IsGamepadButtonDown(0, .LEFT_FACE_DOWN) {
-			input.y += 1
-		}
-		if rl.IsGamepadButtonDown(0, .LEFT_FACE_LEFT) {
-			input.x -= 1
-		}
-		if rl.IsGamepadButtonDown(0, .LEFT_FACE_RIGHT) {
-			input.x += 1
+		// Right analog stick for looking
+		look_x := rl.GetGamepadAxisMovement(0, .RIGHT_X)
+		look_y := rl.GetGamepadAxisMovement(0, .RIGHT_Y)
+
+		// Apply deadzone and sensitivity
+		LOOK_DEADZONE :: 0.3
+		LOOK_SENSITIVITY :: 2.0
+		if abs(look_x) > LOOK_DEADZONE || abs(look_y) > LOOK_DEADZONE {
+			// Calculate rotation angle based on right stick input
+			yaw := look_x * LOOK_SENSITIVITY * rl.GetFrameTime()
+			//pitch := look_y * LOOK_SENSITIVITY * rl.GetFrameTime()
+
+			// Rotate facing direction around Y axis (left/right)
+			cos_yaw := math.cos(yaw)
+			sin_yaw := math.sin(yaw)
+			g_mem.player_facing = {
+				g_mem.player_facing.x * cos_yaw - g_mem.player_facing.z * sin_yaw,
+				g_mem.player_facing.y,
+				g_mem.player_facing.x * sin_yaw + g_mem.player_facing.z * cos_yaw,
+			}
+
+			// Normalize to maintain unit vector
+			g_mem.player_facing = linalg.normalize(g_mem.player_facing)
 		}
 	}
+	if rl.IsKeyDown(.UP) || rl.IsKeyDown(.W) {
+		input += g_mem.player_facing
+	}
+	if rl.IsKeyDown(.DOWN) || rl.IsKeyDown(.S) {
+		input -= g_mem.player_facing
+	}
+	if rl.IsKeyDown(.LEFT) || rl.IsKeyDown(.A) {
+		input += {g_mem.player_facing.z, 0, -g_mem.player_facing.x}
+	}
+	if rl.IsKeyDown(.RIGHT) || rl.IsKeyDown(.D) {
+		input -= {g_mem.player_facing.z, 0, -g_mem.player_facing.x}
+	}
+	
 
-	input = linalg.normalize0(input)
+	//input = linalg.normalize0(input)
+	
 	g_mem.player_pos += input * rl.GetFrameTime() * 100
+	
+	// Calculate ideal camera position within an angle behind the player
+	MAX_ANGLE :f32 = 45.0 // Maximum angle deviation from directly behind (in degrees)
+	CAMERA_DISTANCE :f32 = 20.0
+	CAMERA_HEIGHT :f32 = 10.0
+	
+	// Get current camera offset (relative to player)
+	current_offset := g_mem.camera_pos - g_mem.player_pos
+	
+	// Calculate ideal camera position based on player facing
+	target_angle := math.atan2(-g_mem.player_facing.x, -g_mem.player_facing.z)
+	
+	// Get current horizontal angle of camera
+	current_angle := math.atan2(current_offset.x, current_offset.z)
+	
+	// Calculate shortest angle difference and clamp to max allowed
+	angle_diff := math.angle_diff(current_angle, target_angle)
+	clamped_diff := math.clamp(angle_diff, -math.to_radians(MAX_ANGLE), math.to_radians(MAX_ANGLE))
+	
+	// Calculate final camera angle by adding clamped difference to target
+	final_angle :f32= target_angle + clamped_diff
+	
+	// Calculate ideal camera position using final angle
+	ideal_camera_pos := g_mem.player_pos + rl.Vector3{
+		math.sin(final_angle) * CAMERA_DISTANCE,
+		CAMERA_HEIGHT,
+		math.cos(final_angle) * CAMERA_DISTANCE,
+	}
+	
+	// Smoothly interpolate camera position
+	camera_smoothing :f32= 5.0
+	g_mem.camera_pos = linalg.lerp(
+		g_mem.camera_pos,
+		ideal_camera_pos,
+		min(1.0, rl.GetFrameTime() * camera_smoothing),
+	)
+	
 	g_mem.some_number += 1
 
-	if rl.IsKeyPressed(.ESCAPE) {
-		g_mem.run = false
-	}
+	//if rl.IsKeyPressed(.ESCAPE) {
+	//	g_mem.run = false
+	//}
 }
 
 draw :: proc() {
 	rl.BeginDrawing()
 	rl.ClearBackground(rl.BLACK)
 
-	rl.BeginMode2D(game_camera())
-	rl.DrawTextureEx(g_mem.player_texture, g_mem.player_pos, 0, 1, rl.WHITE)
-	rl.DrawRectangleV({20, 20}, {10, 10}, rl.BLUE)
-	rl.DrawRectangleV({-30, -20}, {10, 10}, rl.GREEN)
-	rl.EndMode2D()
+	rl.BeginMode3D(game_camera())
+
+	rl.DrawSphere(g_mem.player_pos, 1.0, rl.BLUE)
+	rl.DrawPlane({0, -1, 0}, {10, 10}, rl.GRAY) // Center at y=-1, 10x10 size
+	rl.DrawLine3D(g_mem.player_pos, g_mem.player_pos + g_mem.player_facing * 10, rl.RED)
+	
+	rl.EndMode3D()
+
+	rl.BeginMode3D(rl.Camera3D{
+		position = {40, 40, 40},
+		target = {0, 0, 0},
+		up = {0, 1, 0},
+		fovy = 45,
+		projection = .PERSPECTIVE,
+	})
+	rl.DrawSphere(g_mem.player_pos, 1.0, rl.RED)
+	rl.DrawPlane({0, -1, 0}, {10, 10}, rl.GREEN) // Center at y=-1, 10x10 size
+	rl.DrawLine3D(g_mem.player_pos, g_mem.player_pos + g_mem.player_facing * 10, rl.RED)
+	rl.EndMode3D()
 
 	rl.BeginMode2D(ui_camera())
 
@@ -146,7 +209,7 @@ game_update :: proc() {
 game_init_window :: proc() {
 	rl.SetConfigFlags({.WINDOW_RESIZABLE, .VSYNC_HINT})
 	rl.InitWindow(1280, 720, "Odin + Raylib + Hot Reload template!")
-	rl.SetWindowPosition(200, 200)
+	rl.SetWindowPosition(1200, 1200)
 	rl.SetTargetFPS(500)
 	rl.SetExitKey(nil)
 }
