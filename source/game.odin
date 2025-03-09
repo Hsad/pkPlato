@@ -46,6 +46,7 @@ Game_Memory :: struct {
 	some_number: int,
 	run: bool,
 	debug: Debug_data,
+	ground_model: rl.Model,
 }
 
 g_mem: ^Game_Memory
@@ -67,7 +68,100 @@ ui_camera :: proc() -> rl.Camera2D {
 	}
 }
 
+@(export)
+game_init :: proc() {
+	g_mem = new(Game_Memory)
+
+	ground_img := rl.GenImagePerlinNoise(256,256,0,0,1)
+	defer rl.UnloadImage(ground_img)
+	ground_mesh := rl.GenMeshPlane(100, 100, 1, 1)
+	ground_model := rl.LoadModelFromMesh(ground_mesh)
+	//ground_model.materials = rl.LoadMaterialDefault()
+	ground_model.materials[0].maps[0].texture = rl.LoadTextureFromImage(ground_img)
+	g_mem^ = Game_Memory {
+		run = true,
+		some_number = 100,
+
+		// You can put textures, sounds and music in the `assets` folder. Those
+		// files will be part any release or web build.
+		player_texture = rl.LoadTexture("assets/round_cat.png"),
+		player_look_target = {10, 0, 0},  // Initialize some distance in front of default spawn
+		ground_model = ground_model,
+	}
+
+	game_hot_reloaded(g_mem)
+}
+
 update :: proc() {
+	controller_input()
+	
+	calc_camera()
+
+	{
+		//verlet integration, position based dynamics
+		//old_ball_pos := g_mem.test_ball_pos
+		//g_mem.test_ball_pos.y += gravity * rl.GetFrameTime()
+
+
+
+	}
+
+	//Simulate gravity / forces
+	//Check collisions
+	//apply reaction forces
+
+
+	g_mem.some_number += 1
+
+	//if rl.IsKeyPressed(.ESCAPE) {
+	//	g_mem.run = false
+	//}
+}
+
+draw :: proc() {
+	rl.BeginDrawing()
+	rl.ClearBackground(rl.BLACK)
+
+	rl.BeginMode3D(game_camera())
+
+	rl.DrawModel(g_mem.ground_model, {0, 0, 0}, 1, rl.WHITE)
+
+	// Draw the player as a small blue sphere
+	rl.DrawSphere(g_mem.player_pos, 1.0, rl.BLUE)
+	// Draw the ideal camera position as a small green sphere
+	rl.DrawSphere(g_mem.debug.ideal_camera_pos, 0.3, rl.GREEN)
+	rl.DrawLine3D(g_mem.player_pos, g_mem.debug.ideal_camera_pos, rl.GREEN)
+	// Draw the look target as a small yellow sphere
+	rl.DrawLine3D(g_mem.player_pos, g_mem.player_look_target, rl.YELLOW)
+	rl.DrawSphere(g_mem.player_look_target, 0.3, rl.YELLOW)
+	
+	rl.EndMode3D()
+
+	//rl.BeginMode3D(rl.Camera3D{
+		//position = {40, 40, 40},
+		//target = {0, 0, 0},
+		//up = {0, 1, 0},
+		//fovy = 45,
+		//projection = .PERSPECTIVE,
+	//})
+	//rl.DrawSphere(g_mem.player_pos, 1.0, rl.RED)
+	//rl.DrawPlane({0, -1, 0}, {10, 10}, rl.GREEN) // Center at y=-1, 10x10 size
+	//rl.DrawLine3D(g_mem.player_pos, g_mem.player_look_target, rl.RED)
+	//rl.EndMode3D()
+
+	rl.BeginMode2D(ui_camera())
+
+	// NOTE: `fmt.ctprintf` uses the temp allocator. The temp allocator is
+	// cleared at the end of the frame by the main application, meaning inside
+	// `main_hot_reload.odin`, `main_release.odin` or `main_web_entry.odin`.
+	rl.DrawText(fmt.ctprintf("some_number: %v\nplayer_pos: %v", g_mem.some_number, g_mem.player_pos), 5, 5, 8, rl.WHITE)
+
+	rl.EndMode2D()
+
+	rl.EndDrawing()
+}
+
+controller_input :: proc() {
 	input: rl.Vector3
 
 	// Gamepad input (using first connected gamepad)
@@ -132,7 +226,7 @@ update :: proc() {
 			look_dir = linalg.normalize(look_dir)
 			
 			// Forward/backward movement along look direction on xz plane
-			input += look_dir * -z
+			input += look_dir * -z * 0.5
 			
 			// Strafe movement perpendicular to look direction on xz plane
 			right_dir := rl.Vector3{look_dir.z, 0, -look_dir.x}
@@ -166,24 +260,24 @@ update :: proc() {
 		}
 
 	}
-	if rl.IsKeyDown(.UP) || rl.IsKeyDown(.W) {
-		input += g_mem.player_look_target
-	}
-	if rl.IsKeyDown(.DOWN) || rl.IsKeyDown(.S) {
-		input -= g_mem.player_look_target
-	}
-	if rl.IsKeyDown(.LEFT) || rl.IsKeyDown(.A) {
-		input += {g_mem.player_look_target.z, 0, -g_mem.player_look_target.x}
-	}
-	if rl.IsKeyDown(.RIGHT) || rl.IsKeyDown(.D) {
-		input -= {g_mem.player_look_target.z, 0, -g_mem.player_look_target.x}
-	}
-	
-
+	//if rl.IsKeyDown(.UP) || rl.IsKeyDown(.W) {
+	//	input += g_mem.player_look_target
+	//}
+	//if rl.IsKeyDown(.DOWN) || rl.IsKeyDown(.S) {
+	//	input -= g_mem.player_look_target
+	//}
+	//if rl.IsKeyDown(.LEFT) || rl.IsKeyDown(.A) {
+	//	input += {g_mem.player_look_target.z, 0, -g_mem.player_look_target.x}
+	//}
+	//if rl.IsKeyDown(.RIGHT) || rl.IsKeyDown(.D) {
+	//	input -= {g_mem.player_look_target.z, 0, -g_mem.player_look_target.x}
+	//}
 	
 	g_mem.player_pos += input * rl.GetFrameTime() * 100
 	g_mem.player_look_target += input * rl.GetFrameTime() * 100
-	
+}
+
+calc_camera :: proc() {
 	// Camera constants
 	CAMERA_DISTANCE :f32 = 20.0
 	CAMERA_HEIGHT :f32 = 10.0
@@ -223,54 +317,8 @@ update :: proc() {
 	// Combine components for final camera position
 	g_mem.camera_pos = new_horizontal + new_vertical
 	
-	g_mem.some_number += 1
 	
 	g_mem.debug.ideal_camera_pos = ideal_camera_pos
-
-	//if rl.IsKeyPressed(.ESCAPE) {
-	//	g_mem.run = false
-	//}
-}
-
-draw :: proc() {
-	rl.BeginDrawing()
-	rl.ClearBackground(rl.BLACK)
-
-	rl.BeginMode3D(game_camera())
-
-	rl.DrawSphere(g_mem.player_pos, 1.0, rl.BLUE)
-	rl.DrawPlane({0, -1, 0}, {100, 100}, rl.GRAY) // Center at y=-1, 10x10 size
-	rl.DrawLine3D(g_mem.player_pos, g_mem.player_look_target, rl.YELLOW)
-	rl.DrawSphere(g_mem.debug.ideal_camera_pos, 0.3, rl.GREEN)
-	rl.DrawLine3D(g_mem.player_pos, g_mem.debug.ideal_camera_pos, rl.GREEN)
-	
-	// Draw the look target as a small yellow sphere
-	rl.DrawSphere(g_mem.player_look_target, 0.3, rl.YELLOW)
-	
-	rl.EndMode3D()
-
-	rl.BeginMode3D(rl.Camera3D{
-		position = {40, 40, 40},
-		target = {0, 0, 0},
-		up = {0, 1, 0},
-		fovy = 45,
-		projection = .PERSPECTIVE,
-	})
-	rl.DrawSphere(g_mem.player_pos, 1.0, rl.RED)
-	rl.DrawPlane({0, -1, 0}, {10, 10}, rl.GREEN) // Center at y=-1, 10x10 size
-	rl.DrawLine3D(g_mem.player_pos, g_mem.player_look_target, rl.RED)
-	rl.EndMode3D()
-
-	rl.BeginMode2D(ui_camera())
-
-	// NOTE: `fmt.ctprintf` uses the temp allocator. The temp allocator is
-	// cleared at the end of the frame by the main application, meaning inside
-	// `main_hot_reload.odin`, `main_release.odin` or `main_web_entry.odin`.
-	rl.DrawText(fmt.ctprintf("some_number: %v\nplayer_pos: %v", g_mem.some_number, g_mem.player_pos), 5, 5, 8, rl.WHITE)
-
-	rl.EndMode2D()
-
-	rl.EndDrawing()
 }
 
 @(export)
@@ -288,22 +336,6 @@ game_init_window :: proc() {
 	rl.SetExitKey(nil)
 }
 
-@(export)
-game_init :: proc() {
-	g_mem = new(Game_Memory)
-
-	g_mem^ = Game_Memory {
-		run = true,
-		some_number = 100,
-
-		// You can put textures, sounds and music in the `assets` folder. Those
-		// files will be part any release or web build.
-		player_texture = rl.LoadTexture("assets/round_cat.png"),
-		player_look_target = {10, 0, 0},  // Initialize some distance in front of default spawn
-	}
-
-	game_hot_reloaded(g_mem)
-}
 
 @(export)
 game_should_run :: proc() -> bool {
