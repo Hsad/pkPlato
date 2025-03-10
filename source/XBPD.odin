@@ -65,9 +65,11 @@ Contact :: struct {
 
 // Helper function to transform a local point to world space
 transform_point :: proc(body: ^RigidBody, local_point: Vector3) -> Vector3 {
-    // In a full implementation, we'd use quaternion to rotate the point
-    // Simplified for clarity
-    world_point := local_point + body.position
+    // Rotate the local point using the body's orientation quaternion
+    rotated_point := rotate_vector(body.orientation, local_point)
+    
+    // Translate to world space
+    world_point := rotated_point + body.position
     return world_point
 }
 
@@ -153,11 +155,22 @@ solve_contact :: proc(contact: ^Contact, dt: f32) {
     // Combine compliance from both bodies
     combined_compliance := body_a.compliance + body_b.compliance
     
+    // Add a small bias to prevent objects from sinking
+    bias_factor : f32= 0.2  // Baumgarte stabilization factor
+    bias := bias_factor * max(0, -d) / dt
+    
     // Convert compliance to alpha_tilde (α̃ = α/h²)
     alpha_tilde := combined_compliance / (dt * dt)
     
     // XPBD constraint update: Δλ = (-c - α̃λ) / (w + α̃)
-    delta_lambda := (-d - alpha_tilde * contact.lambda_normal) / (w + alpha_tilde)
+    denominator := w + alpha_tilde
+    
+    // Add safety check to prevent division by zero
+    if denominator < 1e-10 {
+        return
+    }
+    
+    delta_lambda := (-d - bias - alpha_tilde * contact.lambda_normal) / denominator
     contact.lambda_normal += delta_lambda
     
     // Apply positional correction for normal constraint
@@ -306,6 +319,11 @@ normalize_quaternion :: proc(q: Quaternion) -> Quaternion {
         q[2] * q[2] +
         q[3] * q[3])
     
+    // Add safety check to prevent division by zero
+    if length < 1e-10 {
+        return {0, 0, 0, 1} // Return identity quaternion if length is too small
+    }
+    
     return {
         q[0] / length,
         q[1] / length,
@@ -400,19 +418,8 @@ apply_angular_impulse :: proc(body: ^RigidBody, angular_impulse: Vector3) -> Qua
     // Combine with current orientation
     new_orientation := quaternion_multiply(delta_rotation, body.orientation)
     
-    // Normalize
-    length := math.sqrt(
-        new_orientation[0] * new_orientation[0] +
-        new_orientation[1] * new_orientation[1] +
-        new_orientation[2] * new_orientation[2] +
-        new_orientation[3] * new_orientation[3])
-    
-    return {
-        new_orientation[0] / length,
-        new_orientation[1] / length,
-        new_orientation[2] / length,
-        new_orientation[3] / length,
-    }
+    // Use the normalize_quaternion function which now has safety checks
+    return normalize_quaternion(new_orientation)
 }
 
 // Multiply two quaternions
@@ -566,6 +573,17 @@ solve_xpbd :: proc(bodies: []RigidBody, contacts: []Contact, dt: f32, iterations
                 q_diff[0] * 2.0 / dt,
                 q_diff[1] * 2.0 / dt,
                 q_diff[2] * 2.0 / dt,
+            }
+            
+            // Add safety check for NaN values
+            if math.is_nan(bodies[i].position.x) || math.is_nan(bodies[i].position.y) || math.is_nan(bodies[i].position.z) {
+                bodies[i].position = bodies[i].position_prev
+                bodies[i].linear_velocity = {0, 0, 0}
+            }
+            
+            if math.is_nan(bodies[i].angular_velocity.x) || math.is_nan(bodies[i].angular_velocity.y) || math.is_nan(bodies[i].angular_velocity.z) {
+                bodies[i].angular_velocity = {0, 0, 0}
+                bodies[i].orientation = bodies[i].orientation_prev
             }
         }
     }
@@ -764,7 +782,17 @@ detect_sphere_sphere :: proc(a, b: ^RigidBody) -> (bool, Contact) {
     
     if distance_squared < radius_sum * radius_sum {
         distance := math.sqrt(distance_squared)
-        normal := delta / distance
+        
+        // Avoid division by zero with a more robust check
+        normal := Vector3{0, 1, 0}
+        if distance > 0.0001 {
+            normal = delta / distance
+        }
+        
+        // Validate normal vector
+        if math.is_nan(normal.x) || math.is_nan(normal.y) || math.is_nan(normal.z) {
+            normal = {0, 1, 0}
+        }
         
         contact := Contact{
             body_a = a,
@@ -775,6 +803,8 @@ detect_sphere_sphere :: proc(a, b: ^RigidBody) -> (bool, Contact) {
             dynamic_friction = (a.dynamic_friction + b.dynamic_friction) * 0.5,
             local_point_a = normal * -a.shape_size.x,
             local_point_b = normal * b.shape_size.x,
+            lambda_normal = 0,
+            lambda_tangent = 0,
         }
         
         return true, contact
@@ -797,11 +827,11 @@ detect_box_sphere :: proc(box, sphere: ^RigidBody) -> (bool, Contact) {
     
     if dist_squared < sphere.shape_size.x * sphere.shape_size.x {
         dist := math.sqrt(dist_squared)
-        normal := delta
-        if dist > 0 {
+        
+        // Avoid division by zero
+        normal := Vector3{0, 1, 0}
+        if dist > 0.0001 {
             normal = delta / dist
-        } else {
-            normal = {0, 1, 0}
         }
         
         contact := Contact{
@@ -813,6 +843,8 @@ detect_box_sphere :: proc(box, sphere: ^RigidBody) -> (bool, Contact) {
             dynamic_friction = (sphere.dynamic_friction + box.dynamic_friction) * 0.5,
             local_point_a = normal * -sphere.shape_size.x,
             local_point_b = closest - box.position,
+            lambda_normal = 0,
+            lambda_tangent = 0,
         }
         
         return true, contact
@@ -861,15 +893,27 @@ detect_box_box :: proc(a, b: ^RigidBody) -> (bool, Contact) {
     }
     
     // Find contact point (center of overlap region)
+    min_a := a.position - a.shape_size
+    max_a := a.position + a.shape_size
     min_b := b.position - b.shape_size
     max_b := b.position + b.shape_size
     
-    // Project point a onto box b's bounds
-    contact_point := Vector3{
-        clamp(a.position.x, min_b.x, max_b.x),
-        clamp(a.position.y, min_b.y, max_b.y), 
-        clamp(a.position.z, min_b.z, max_b.z),
+    // Calculate overlap box
+    overlap_min := Vector3{
+        max(min_a.x, min_b.x),
+        max(min_a.y, min_b.y),
+        max(min_a.z, min_b.z),
     }
+    
+    overlap_max := Vector3{
+        min(max_a.x, max_b.x),
+        min(max_a.y, max_b.y),
+        min(max_a.z, max_b.z),
+    }
+    
+    // Contact point at center of overlap region
+    contact_point := (overlap_min + overlap_max) * 0.5
+    
     contact := Contact{
         body_a = a,
         body_b = b,
@@ -879,6 +923,8 @@ detect_box_box :: proc(a, b: ^RigidBody) -> (bool, Contact) {
         dynamic_friction = (a.dynamic_friction + b.dynamic_friction) * 0.5,
         local_point_a = contact_point - a.position,
         local_point_b = contact_point - b.position,
+        lambda_normal = 0,
+        lambda_tangent = 0,
     }
     
     return true, contact

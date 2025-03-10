@@ -99,23 +99,31 @@ game_init :: proc() {
 
 	// Initialize physics world
 	physics_world := create_physics_world()
+	
+	// Configure physics world for better stability
+	configure_physics_world(physics_world, 20, 1, {0, -9.81, 0})
+	
 	physics_bodies := make([dynamic]int)
 	
 	// Create a ground plane (static body)
-	ground_index := create_box(physics_world, {0, -1, 0}, {100, 1, 100}, 0)
+	ground_index := create_box(physics_world, {0, -1, 0}, {100, 2.1, 100}, 0, 0.001)
 	append(&physics_bodies, ground_index)
 	
-	// Create some dynamic boxes
+	// Create some dynamic boxes with different compliance values
 	for i in 0..<10 {
-		pos := Vector3{f32(rl.GetRandomValue(-20, 20)), f32(5 + i * 2), f32(rl.GetRandomValue(-20, 20))}
-		box_index := create_box(physics_world, pos, {1, 1, 1}, 1)
+		pos := Vector3{f32(rl.GetRandomValue(-20, 20)), f32(50 + i * 2), f32(rl.GetRandomValue(-20, 20))}
+		// Use slightly different compliance values for variety
+		compliance := 0.01 + f32(i) * 0.001
+		box_index := create_box(physics_world, pos, {1, 1, 1}, 1, compliance)
 		append(&physics_bodies, box_index)
 	}
 	
-	// Create some dynamic spheres
+	// Create some dynamic spheres with different compliance values
 	for i in 0..<10 {
 		pos := Vector3{f32(rl.GetRandomValue(-20, 20)), f32(15 + i * 2), f32(rl.GetRandomValue(-20, 20))}
-		sphere_index := create_sphere(physics_world, pos, 1, 1)
+		// Use slightly different compliance values for variety
+		compliance := 0.005 + f32(i) * 0.0005
+		sphere_index := create_sphere(physics_world, pos, 1, 1, compliance)
 		append(&physics_bodies, sphere_index)
 	}
 
@@ -245,18 +253,39 @@ draw :: proc() {
 		// Convert Vector3 to rl.Vector3
 		pos := rl.Vector3{body.position[0], body.position[1], body.position[2]}
 		
-		color := body.inverse_mass == 0 ? rl.GREEN : rl.RED
+		// Choose color based on body type
+		color := rl.WHITE
+		if body.inverse_mass == 0 {
+			color = rl.GREEN  // Static bodies
+		} else if body.shape_type == .Sphere {
+			color = rl.BLUE   // Dynamic spheres
+		} else {
+			color = rl.RED    // Dynamic boxes
+		}
 		
+		// Draw with wireframe for better visibility
 		switch body.shape_type {
 		case .Sphere:
-			rl.DrawSphere(pos, body.shape_size.x, color)
+			rl.DrawSphereWires(pos, body.shape_size[0], 8, 8, color)
+			rl.DrawSphere(pos, body.shape_size[0], rl.ColorAlpha(color, 0.5))
 		case .Box:
 			size := rl.Vector3{
 				body.shape_size.x * 2, // Multiply by 2 since shape_size is half-extents
 				body.shape_size.y * 2,
 				body.shape_size.z * 2,
 			}
-			rl.DrawCubeV(pos, size, color)
+			rl.DrawCubeWires(pos, size.x, size.y, size.z, color)
+			rl.DrawCubeV(pos, size, rl.ColorAlpha(color, 0.5))
+		}
+		
+		// Draw velocity vector for debugging
+		if body.inverse_mass > 0 {
+			vel_end := rl.Vector3{
+				pos.x + body.linear_velocity[0],
+				pos.y + body.linear_velocity[1],
+				pos.z + body.linear_velocity[2],
+			}
+			rl.DrawLine3D(pos, vel_end, rl.YELLOW)
 		}
 	}
 	
@@ -282,6 +311,7 @@ draw :: proc() {
 	//rl.DrawText(fmt.ctprintf("some_number: %v\nplayer_pos: %v", g_mem.some_number, g_mem.player_pos), 5, 5, 8, rl.WHITE)
 	// frame time and frame rate
 	rl.DrawText(fmt.ctprintf("ft: %v\nfps: %v", rl.GetFrameTime(), rl.GetFPS()), 5, 5, 8, rl.WHITE)
+	rl.DrawText(fmt.ctprintf("body 1: %v", g_mem.physics_world.bodies[1].position), 5, 30, 8, rl.WHITE)
 
 	rl.EndMode2D()
 
