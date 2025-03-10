@@ -56,6 +56,7 @@ Game_Memory :: struct {
 	// Physics world
 	physics_world: ^PhysicsWorld,
 	physics_bodies: [dynamic]int,  // Indices into the physics world
+	player_physics_body_index: int, // Index of the player's physics body
 }
 
 g_mem: ^Game_Memory
@@ -101,16 +102,31 @@ game_init :: proc() {
 	physics_world := create_physics_world()
 	
 	// Configure physics world for better stability
-	configure_physics_world(physics_world, 20, 1, {0, -9.81, 0})
+	// Increase iterations for more accurate simulation
+	configure_physics_world(physics_world, 4, 10, {0, -9.81, 0})
 	
 	physics_bodies := make([dynamic]int)
+	
+	// Create player physics body (a sphere)
+	player_start_pos := Vector3{0, 5, 0}  // Start a bit higher to see if gravity works
+	player_radius := f32(1.0)
+	player_mass := f32(1.0)  // Even lighter for more responsive movement
+	player_compliance := f32(0.00001)  // Much stiffer for better control
+	player_physics_index := create_sphere(physics_world, player_start_pos, player_radius, player_mass, player_compliance)
+	
+	// Set player material properties for better control
+	// Higher restitution for better bouncing, lower friction for smoother movement
+	set_material_properties(physics_world, player_physics_index, 0.5, 0.2, 0.1, player_compliance)
+	
+	// Add player body to the list of physics bodies
+	append(&physics_bodies, player_physics_index)
 	
 	// Create a ground plane (static body)
 	ground_index := create_box(physics_world, {0, -1, 0}, {100, 2.1, 100}, 0, 0.001)
 	append(&physics_bodies, ground_index)
 	
 	// Create some dynamic boxes with different compliance values
-	for i in 0..<10 {
+	for i in 0..<5 {
 		pos := Vector3{f32(rl.GetRandomValue(-20, 20)), f32(50 + i * 2), f32(rl.GetRandomValue(-20, 20))}
 		// Use slightly different compliance values for variety
 		compliance := 0.01 + f32(i) * 0.001
@@ -119,7 +135,7 @@ game_init :: proc() {
 	}
 	
 	// Create some dynamic spheres with different compliance values
-	for i in 0..<10 {
+	for i in 0..<20 {
 		pos := Vector3{f32(rl.GetRandomValue(-20, 20)), f32(15 + i * 2), f32(rl.GetRandomValue(-20, 20))}
 		// Use slightly different compliance values for variety
 		compliance := 0.005 + f32(i) * 0.0005
@@ -134,11 +150,14 @@ game_init :: proc() {
 		// You can put textures, sounds and music in the `assets` folder. Those
 		// files will be part any release or web build.
 		player_texture = rl.LoadTexture("assets/round_cat.png"),
-		player_look_target = {10, 0, 0},  // Initialize some distance in front of default spawn
+		player_pos = {player_start_pos.x, player_start_pos.y, player_start_pos.z},  // Initialize player position
+		player_look_target = {player_start_pos.x + 10, player_start_pos.y, player_start_pos.z},  // Initialize some distance in front of player
+		camera_pos = {player_start_pos.x - 10, player_start_pos.y + 5, player_start_pos.z},  // Initialize behind player
 		ground_model = ground_model,
 		ground_boxes = ground_boxes,
 		physics_world = physics_world,
 		physics_bodies = physics_bodies,
+		player_physics_body_index = player_physics_index,
 	}
 
 	game_hot_reloaded(g_mem)
@@ -148,12 +167,31 @@ update :: proc() {
 	// input_intent?
 	controller_input()
 	
-	// before or after physics?
-	calc_camera()
-
+	// Test force application - press T key to apply a strong upward force
+	if rl.IsKeyPressed(.T) {
+		current_vel := get_velocity(g_mem.physics_world, g_mem.player_physics_body_index)
+		physics_vel := Vector3{current_vel.x, current_vel.y, current_vel.z}
+		physics_vel.y = 100.0  // Strong upward force
+		set_velocity(g_mem.physics_world, g_mem.player_physics_body_index, physics_vel, {0, 0, 0})
+	}
+	
 	// Update physics
 	update_physics(g_mem.physics_world, rl.GetFrameTime())
+	
+	// Update player position from physics body
+	physics_pos := get_position(g_mem.physics_world, g_mem.player_physics_body_index)
+	//physics_vel := get_velocity(g_mem.physics_world, g_mem.player_physics_body_index)
+	
+	// Debug print
+	//fmt.println("Physics pos:", physics_pos, "Physics vel:", physics_vel)
+	
+	g_mem.player_pos = {physics_pos.x, physics_pos.y, physics_pos.z}
+	
+	// Update camera after player position is updated
+	calc_camera()
 
+	// Temporarily comment out AABB collision detection to see if it's interfering
+	/*
 	{
 		// Check collisions between player and all ground boxes
 		for box, i in g_mem.ground_boxes {
@@ -166,8 +204,8 @@ update :: proc() {
 				g_mem.ground_boxes[i].is_colliding = false
 			}
 		}
-
 	}
+	*/
 
 	{
 		gravity :: rl.Vector3{0, -9.8, 0}
@@ -225,13 +263,22 @@ draw :: proc() {
 
 	// Draw the player as a small blue sphere
 	rl.DrawSphere(g_mem.player_pos, 1.0, rl.BLUE)
+	
+	// Draw player velocity vector
+	physics_vel := get_velocity(g_mem.physics_world, g_mem.player_physics_body_index)
+	vel_end := rl.Vector3{
+		g_mem.player_pos.x + physics_vel.x,
+		g_mem.player_pos.y + physics_vel.y,
+		g_mem.player_pos.z + physics_vel.z,
+	}
+	rl.DrawLine3D(g_mem.player_pos, vel_end, rl.MAGENTA)
+	
 	// Draw the ideal camera position as a small green sphere
 	rl.DrawSphere(g_mem.debug.ideal_camera_pos, 0.3, rl.GREEN)
 	rl.DrawLine3D(g_mem.player_pos, g_mem.debug.ideal_camera_pos, rl.GREEN)
 	// Draw the look target as a small yellow sphere
 	rl.DrawLine3D(g_mem.player_pos, g_mem.player_look_target, rl.YELLOW)
 	rl.DrawSphere(g_mem.player_look_target, 0.3, rl.YELLOW)
-
 
 	//debug
 	rl.DrawSphere(g_mem.debug.nearest_point, 0.3, rl.RED)
@@ -280,7 +327,7 @@ draw :: proc() {
 		
 		// Draw velocity vector for debugging
 		if body.inverse_mass > 0 {
-			vel_end := rl.Vector3{
+			vel_end = rl.Vector3{
 				pos.x + body.linear_velocity[0],
 				pos.y + body.linear_velocity[1],
 				pos.z + body.linear_velocity[2],
@@ -311,7 +358,8 @@ draw :: proc() {
 	//rl.DrawText(fmt.ctprintf("some_number: %v\nplayer_pos: %v", g_mem.some_number, g_mem.player_pos), 5, 5, 8, rl.WHITE)
 	// frame time and frame rate
 	rl.DrawText(fmt.ctprintf("ft: %v\nfps: %v", rl.GetFrameTime(), rl.GetFPS()), 5, 5, 8, rl.WHITE)
-	rl.DrawText(fmt.ctprintf("body 1: %v", g_mem.physics_world.bodies[1].position), 5, 30, 8, rl.WHITE)
+	rl.DrawText(fmt.ctprintf("player: %v", g_mem.physics_world.bodies[0].position), 5, 30, 8, rl.WHITE)
+	rl.DrawText(fmt.ctprintf("player: %v", g_mem.physics_world.bodies[0].linear_velocity), 5, 45, 8, rl.WHITE)
 
 	rl.EndMode2D()
 
@@ -388,7 +436,10 @@ controller_input :: proc() {
 			// Strafe movement perpendicular to look direction on xz plane
 			right_dir := rl.Vector3{look_dir.z, 0, -look_dir.x}
 			input -= right_dir * x * 0.2
+			
+			//fmt.println("Input direction:", input)
 		}
+		
 		// adjust vertical look back to center while moving
 		if is_moving && !is_looking {
 			RETURN_TO_LEVEL_SPEED :: 2.0 // Speed at which view returns to level
@@ -416,39 +467,63 @@ controller_input :: proc() {
 			g_mem.player_look_target = g_mem.player_pos + linalg.normalize(new_offset) * LOOK_DISTANCE
 		}
 
-		{
-			// jump physics
-			// xbox a button
-			if rl.IsGamepadButtonPressed(0, .RIGHT_FACE_DOWN) {
-				g_mem.player_vel.y += 10
-				g_mem.player_pos.y += 1
+		// Get current velocity from physics system
+		current_vel := get_velocity(g_mem.physics_world, g_mem.player_physics_body_index)
+		physics_vel := Vector3{current_vel.x, current_vel.y, current_vel.z}
+		
+		//fmt.println("Current physics velocity before:", physics_vel)
+		
+		// Apply movement forces to physics body
+		if linalg.length(input) > 0 {
+			// Convert input to physics Vector3
+			move_force := Vector3{input.x, input.y, input.z}
+			
+			// Scale force for better control
+			MOVE_FORCE_SCALE :: f32(100.0)  // Increased for more responsive movement
+			move_force *= MOVE_FORCE_SCALE
+			
+			// Apply stronger horizontal damping to prevent excessive speed
+			HORIZONTAL_DAMPING :: f32(0.8)
+			physics_vel.x *= HORIZONTAL_DAMPING
+			physics_vel.z *= HORIZONTAL_DAMPING
+			
+			// Add movement force to current velocity
+			physics_vel.x += move_force.x
+			physics_vel.z += move_force.z
+			
+			// Cap maximum horizontal speed
+			MAX_HORIZONTAL_SPEED :: f32(50.0)
+			horizontal_speed := math.sqrt(physics_vel.x * physics_vel.x + physics_vel.z * physics_vel.z)
+			if horizontal_speed > MAX_HORIZONTAL_SPEED {
+				scale_factor := MAX_HORIZONTAL_SPEED / horizontal_speed
+				physics_vel.x *= scale_factor
+				physics_vel.z *= scale_factor
 			}
-			// simple gravity
-			g_mem.player_vel.y -= 9.8 * rl.GetFrameTime()
-			g_mem.player_pos.y += g_mem.player_vel.y * rl.GetFrameTime()
-			// floor reset
-			if g_mem.player_pos.y < 0 {
-				g_mem.player_pos.y = 0
-				g_mem.player_vel.y = 0
+			
+			//fmt.println("Applied force:", move_force, "New velocity:", physics_vel)
+			
+			// Apply velocity to physics body
+			set_velocity(g_mem.physics_world, g_mem.player_physics_body_index, physics_vel, {0, 0, 0})
+		}
+		
+		// Jump physics
+		if rl.IsGamepadButtonPressed(0, .RIGHT_FACE_DOWN) {
+			//fmt.println("Jump button pressed")
+			// Only allow jumping if player is close to the ground
+			if g_mem.player_pos.y < 1.5 {
+				// Apply upward impulse
+				JUMP_FORCE :: f32(80.0)  // Increased jump force
+				physics_vel.y = JUMP_FORCE
+				//fmt.println("Applying jump force:", JUMP_FORCE, "New velocity:", physics_vel)
+				set_velocity(g_mem.physics_world, g_mem.player_physics_body_index, physics_vel, {0, 0, 0})
+			} else {
+				fmt.println("Not jumping - too high:", g_mem.player_pos.y)
 			}
-
-
 		}
 	}
-	//if rl.IsKeyDown(.UP) || rl.IsKeyDown(.W) {
-	//	input += g_mem.player_look_target
-	//}
-	//if rl.IsKeyDown(.DOWN) || rl.IsKeyDown(.S) {
-	//	input -= g_mem.player_look_target
-	//}
-	//if rl.IsKeyDown(.LEFT) || rl.IsKeyDown(.A) {
-	//	input += {g_mem.player_look_target.z, 0, -g_mem.player_look_target.x}
-	//}
-	//if rl.IsKeyDown(.RIGHT) || rl.IsKeyDown(.D) {
-	//	input -= {g_mem.player_look_target.z, 0, -g_mem.player_look_target.x}
-	//}
 	
-	g_mem.player_pos += input * rl.GetFrameTime() * 100
+	// Update look target position based on player movement
+	// This is done after physics update in the update function
 	g_mem.player_look_target += input * rl.GetFrameTime() * 100
 }
 

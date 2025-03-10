@@ -2,7 +2,7 @@ package game
 
 import "core:math"
 import "core:math/linalg"
-
+import "core:fmt"
 Vector3 :: [3]f32
 Quaternion :: [4]f32
 
@@ -469,8 +469,8 @@ apply_restitution :: proc(contact: ^Contact, dt: f32) {
     // Extract normal component of relative velocity
     normal_vel := linalg.dot(rel_vel, contact.normal)
     
-    // Skip if separating (positive normal velocity)
-    if normal_vel >= 0 {
+    // Skip if separating (positive normal velocity) or very small velocity
+    if normal_vel >= 0 || abs(normal_vel) < 0.01 {
         return
     }
     
@@ -503,11 +503,22 @@ apply_restitution :: proc(contact: ^Contact, dt: f32) {
     }
     
     // Compute combined restitution coefficient
+    // Use the higher restitution value for more bounce
     combined_restitution := math.max(body_a.restitution, body_b.restitution)
+    
+    // Apply velocity threshold for restitution to prevent tiny bounces
+    RESTITUTION_THRESHOLD :: f32(1.0)  // Only apply restitution for significant impacts
+    
+    // Scale restitution based on impact velocity
+    effective_restitution := combined_restitution
+    if abs(normal_vel) < RESTITUTION_THRESHOLD {
+        // Linearly reduce restitution for low-speed impacts
+        effective_restitution *= abs(normal_vel) / RESTITUTION_THRESHOLD
+    }
     
     // Calculate restitution impulse
     // The target velocity is -restitution * normal_vel
-    delta_vel := -normal_vel * (1.0 + combined_restitution)
+    delta_vel := -normal_vel * (1.0 + effective_restitution)
     
     // Calculate impulse magnitude
     impulse_magnitude := delta_vel / w
@@ -515,20 +526,55 @@ apply_restitution :: proc(contact: ^Contact, dt: f32) {
     // Apply impulse
     impulse := contact.normal * impulse_magnitude
     
-    // Apply to linear velocities
+    // Apply to linear velocities with a minimum impulse to prevent sticking
+    MIN_IMPULSE :: f32(0.05)  // Minimum impulse to apply
+    
     if body_a.inverse_mass > 0 {
-        body_a.linear_velocity += impulse * body_a.inverse_mass
+        // Add a small upward component to prevent sticking
+        adjusted_impulse := impulse
+        if adjusted_impulse.y < MIN_IMPULSE && contact.normal.y > 0.7 {
+            adjusted_impulse.y += MIN_IMPULSE
+        }
+        
+        body_a.linear_velocity += adjusted_impulse * body_a.inverse_mass
         body_a.angular_velocity += linalg.matrix_mul_vector(body_a.inverse_inertia_tensor, cross(r1, impulse))
     }
     
     if body_b.inverse_mass > 0 {
-        body_b.linear_velocity -= impulse * body_b.inverse_mass
+        // Add a small upward component to prevent sticking
+        adjusted_impulse := impulse
+        if adjusted_impulse.y < MIN_IMPULSE && contact.normal.y < -0.7 {
+            adjusted_impulse.y -= MIN_IMPULSE
+        }
+        
+        body_b.linear_velocity -= adjusted_impulse * body_b.inverse_mass
         body_b.angular_velocity -= linalg.matrix_mul_vector(body_b.inverse_inertia_tensor, cross(r2, impulse))
     }
 }
 
 // Main XPBD solver function
-solve_xpbd :: proc(bodies: []RigidBody, contacts: []Contact, dt: f32, iterations: int = 1, gravity: Vector3 = {0, -9.81, 0}) {
+solve_xpbd :: proc(bodies: []RigidBody, contacts: []Contact, dt: f32, gravity: Vector3 = {0, -9.81, 0}) {
+    fmt.println("Bodies:", len(bodies))
+    fmt.println("Contacts:", len(contacts))
+
+    /*
+    How this should work:
+    dts = deltaTime / n-substeps
+    while simulating:
+        for n substeps
+            for all particles i
+                i.vel = i.vel + dts*gravity
+                i.prev_pos= i.pos
+                i.pos = i.pos + dts*i.vel
+            for all constraints C
+                solve(C, dts)
+            for all particles i
+                i.vel = (i.pos - i.prev_pos) / dts
+    
+    */
+
+
+
     // Store previous state for all bodies
     for i := 0; i < len(bodies); i += 1 {
         bodies[i].position_prev = bodies[i].position
@@ -549,19 +595,24 @@ solve_xpbd :: proc(bodies: []RigidBody, contacts: []Contact, dt: f32, iterations
         }
     }
     
-    // Position-based solver iterations
-    for iter := 0; iter < iterations; iter += 1 {
-        // Solve all contact constraints
-        for i := 0; i < len(contacts); i += 1 {
-            solve_contact(&contacts[i], dt)
-        }
+    // Solve all contact constraints
+    for i := 0; i < len(contacts); i += 1 {
+        solve_contact(&contacts[i], dt)
     }
     
-    // Update velocities from positions
+    // Update velocities from positions with a damping factor to prevent freezing
+    VELOCITY_DAMPING :: 0.98  // Slight damping to prevent excessive oscillation
     for i := 0; i < len(bodies); i += 1 {
         if bodies[i].inverse_mass > 0 {
-            // Linear velocity update
-            bodies[i].linear_velocity = (bodies[i].position - bodies[i].position_prev) / dt
+            // Linear velocity update with damping to prevent freezing
+            new_velocity := (bodies[i].position - bodies[i].position_prev) / dt
+            
+            // Blend between previous velocity and new velocity to prevent sudden stops
+            bodies[i].linear_velocity = linalg.lerp(
+                bodies[i].linear_velocity,
+                new_velocity,
+                0.8,  // Blend factor - higher values follow position changes more closely
+            ) * VELOCITY_DAMPING
             
             // Angular velocity update from quaternion difference
             // Extract angular velocity from quaternion difference
@@ -569,11 +620,18 @@ solve_xpbd :: proc(bodies: []RigidBody, contacts: []Contact, dt: f32, iterations
             
             // For small rotations, angular velocity can be approximated as:
             // ω = 2 * q_diff.xyz / dt (when q_diff.w is close to 1)
-            bodies[i].angular_velocity = {
+            new_angular_velocity := Vector3{
                 q_diff[0] * 2.0 / dt,
                 q_diff[1] * 2.0 / dt,
                 q_diff[2] * 2.0 / dt,
             }
+            
+            // Blend angular velocities
+            bodies[i].angular_velocity = linalg.lerp(
+                bodies[i].angular_velocity,
+                new_angular_velocity,
+                0.8,
+            ) * VELOCITY_DAMPING
             
             // Add safety check for NaN values
             if math.is_nan(bodies[i].position.x) || math.is_nan(bodies[i].position.y) || math.is_nan(bodies[i].position.z) {
@@ -585,12 +643,22 @@ solve_xpbd :: proc(bodies: []RigidBody, contacts: []Contact, dt: f32, iterations
                 bodies[i].angular_velocity = {0, 0, 0}
                 bodies[i].orientation = bodies[i].orientation_prev
             }
+            
+            // Ensure objects don't sink below the ground
+            if bodies[i].position.y < 0.01 && bodies[i].linear_velocity.y < 0 {
+                bodies[i].position.y = 0.01
+                
+                // Apply a small upward velocity to prevent sticking
+                if abs(bodies[i].linear_velocity.y) < 0.1 {
+                    bodies[i].linear_velocity.y = 0.1
+                }
+            }
         }
     }
     
     // Apply velocity-level constraints
     
-    // Apply restitution
+    // Apply restitution with improved parameters
     for i := 0; i < len(contacts); i += 1 {
         apply_restitution(&contacts[i], dt)
     }
@@ -969,6 +1037,7 @@ detect_contacts :: proc(world: ^PhysicsWorld) {
             }
         }
     }
+
 }
 
 // Update the physics world by one time step
@@ -982,7 +1051,7 @@ update_physics :: proc(world: ^PhysicsWorld, dt: f32) {
         detect_contacts(world)
         
         // Solve the system using XPBD with configured iterations
-        solve_xpbd(world.bodies[:], world.contacts[:], substep_dt, world.iterations_per_substep, world.gravity)
+        solve_xpbd(world.bodies[:], world.contacts[:], substep_dt, world.gravity)
     }
 }
 
