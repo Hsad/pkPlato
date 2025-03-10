@@ -36,10 +36,12 @@ PIXEL_WINDOW_HEIGHT :: 180
 
 Debug_data :: struct {
 	ideal_camera_pos: rl.Vector3,
+	nearest_point: rl.Vector3,
 }
 
 Game_Memory :: struct {
 	player_pos: rl.Vector3,
+	player_vel: rl.Vector3,
 	player_texture: rl.Texture,
 	camera_pos: rl.Vector3,
 	player_look_target: rl.Vector3,
@@ -49,10 +51,6 @@ Game_Memory :: struct {
 	ground_model: rl.Model,
 	test_ball_pos: rl.Vector3,
 	test_ball_vel: rl.Vector3,
-	pbd_objects: [dynamic]PBD_Object,
-	constraints: [dynamic]Constraint,
-	objects: [dynamic]Object,
-	substeps: int,
 	ground_boxes: [dynamic]AABB,
 }
 
@@ -117,6 +115,22 @@ update :: proc() {
 	// before or after physics?
 	calc_camera()
 
+
+	{
+		// Check collisions between player and all ground boxes
+		for box, i in g_mem.ground_boxes {
+			result := point_in_aabb(g_mem.player_pos, box)
+			if result.is_inside {
+				// Color will be applied in draw proc
+				g_mem.ground_boxes[i].is_colliding = true
+				g_mem.debug.nearest_point = result.nearest_surface_point
+			} else {
+				g_mem.ground_boxes[i].is_colliding = false
+			}
+		}
+
+	}
+
 	{
 		gravity :: rl.Vector3{0, -9.8, 0}
 		dt := rl.GetFrameTime()
@@ -149,7 +163,6 @@ update :: proc() {
 		
 	}
 
-	simulate_ball_on_floor()
 
 
 	//Simulate gravity / forces
@@ -181,10 +194,18 @@ draw :: proc() {
 	rl.DrawLine3D(g_mem.player_pos, g_mem.player_look_target, rl.YELLOW)
 	rl.DrawSphere(g_mem.player_look_target, 0.3, rl.YELLOW)
 
+
+	//debug
+	rl.DrawSphere(g_mem.debug.nearest_point, 0.3, rl.RED)
 	// Draw the ground boxes
 	for box in g_mem.ground_boxes {
+		center := (box.min + box.max) / 2
 		size := box.max - box.min 
-		rl.DrawCubeV(box.min, size, rl.WHITE)
+		if box.is_colliding {
+			rl.DrawCubeV(center, size, rl.RED)
+		} else {
+			rl.DrawCubeV(center, size, rl.WHITE)
+		}
 	}
 
 	// TEST BALL
@@ -209,7 +230,9 @@ draw :: proc() {
 	// NOTE: `fmt.ctprintf` uses the temp allocator. The temp allocator is
 	// cleared at the end of the frame by the main application, meaning inside
 	// `main_hot_reload.odin`, `main_release.odin` or `main_web_entry.odin`.
-	rl.DrawText(fmt.ctprintf("some_number: %v\nplayer_pos: %v", g_mem.some_number, g_mem.player_pos), 5, 5, 8, rl.WHITE)
+	//rl.DrawText(fmt.ctprintf("some_number: %v\nplayer_pos: %v", g_mem.some_number, g_mem.player_pos), 5, 5, 8, rl.WHITE)
+	// frame time and frame rate
+	rl.DrawText(fmt.ctprintf("ft: %v\nfps: %v", rl.GetFrameTime(), rl.GetFPS()), 5, 5, 8, rl.WHITE)
 
 	rl.EndMode2D()
 
@@ -318,7 +341,16 @@ controller_input :: proc() {
 			// jump physics
 			// xbox a button
 			if rl.IsGamepadButtonPressed(0, .RIGHT_FACE_DOWN) {
-				g_mem.test_ball_pos.y += 10
+				g_mem.player_vel.y += 10
+				g_mem.player_pos.y += 1
+			}
+			// simple gravity
+			g_mem.player_vel.y -= 9.8 * rl.GetFrameTime()
+			g_mem.player_pos.y += g_mem.player_vel.y * rl.GetFrameTime()
+			// floor reset
+			if g_mem.player_pos.y < 0 {
+				g_mem.player_pos.y = 0
+				g_mem.player_vel.y = 0
 			}
 
 

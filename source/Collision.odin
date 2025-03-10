@@ -5,6 +5,7 @@ import rl "vendor:raylib"
 AABB :: struct {
     min: rl.Vector3, // Minimum point of the box
     max: rl.Vector3, // Maximum point of the box
+    is_colliding: bool,
 }
 
 
