@@ -52,6 +52,10 @@ Game_Memory :: struct {
 	test_ball_pos: rl.Vector3,
 	test_ball_vel: rl.Vector3,
 	ground_boxes: [dynamic]AABB,
+	
+	// Physics world
+	physics_world: ^PhysicsWorld,
+	physics_bodies: [dynamic]int,  // Indices into the physics world
 }
 
 g_mem: ^Game_Memory
@@ -93,6 +97,28 @@ game_init :: proc() {
 		}
 	}
 
+	// Initialize physics world
+	physics_world := create_physics_world()
+	physics_bodies := make([dynamic]int)
+	
+	// Create a ground plane (static body)
+	ground_index := create_box(physics_world, {0, -1, 0}, {100, 1, 100}, 0)
+	append(&physics_bodies, ground_index)
+	
+	// Create some dynamic boxes
+	for i in 0..<10 {
+		pos := Vector3{f32(rl.GetRandomValue(-20, 20)), f32(5 + i * 2), f32(rl.GetRandomValue(-20, 20))}
+		box_index := create_box(physics_world, pos, {1, 1, 1}, 1)
+		append(&physics_bodies, box_index)
+	}
+	
+	// Create some dynamic spheres
+	for i in 0..<10 {
+		pos := Vector3{f32(rl.GetRandomValue(-20, 20)), f32(15 + i * 2), f32(rl.GetRandomValue(-20, 20))}
+		sphere_index := create_sphere(physics_world, pos, 1, 1)
+		append(&physics_bodies, sphere_index)
+	}
+
 	g_mem^ = Game_Memory {
 		run = true,
 		some_number = 100,
@@ -103,6 +129,8 @@ game_init :: proc() {
 		player_look_target = {10, 0, 0},  // Initialize some distance in front of default spawn
 		ground_model = ground_model,
 		ground_boxes = ground_boxes,
+		physics_world = physics_world,
+		physics_bodies = physics_bodies,
 	}
 
 	game_hot_reloaded(g_mem)
@@ -115,6 +143,8 @@ update :: proc() {
 	// before or after physics?
 	calc_camera()
 
+	// Update physics
+	update_physics(g_mem.physics_world, rl.GetFrameTime())
 
 	{
 		// Check collisions between player and all ground boxes
@@ -208,8 +238,27 @@ draw :: proc() {
 		}
 	}
 
-	// TEST BALL
-	rl.DrawSphere(g_mem.test_ball_pos, 1.0, rl.RED)
+	// Draw physics objects
+	for i := 0; i < len(g_mem.physics_world.bodies); i += 1 {
+		body := g_mem.physics_world.bodies[i]
+		
+		// Convert Vector3 to rl.Vector3
+		pos := rl.Vector3{body.position[0], body.position[1], body.position[2]}
+		
+		color := body.inverse_mass == 0 ? rl.GREEN : rl.RED
+		
+		switch body.shape_type {
+		case .Sphere:
+			rl.DrawSphere(pos, body.shape_size.x, color)
+		case .Box:
+			size := rl.Vector3{
+				body.shape_size.x * 2, // Multiply by 2 since shape_size is half-extents
+				body.shape_size.y * 2,
+				body.shape_size.z * 2,
+			}
+			rl.DrawCubeV(pos, size, color)
+		}
+	}
 	
 	rl.EndMode3D()
 
@@ -447,6 +496,12 @@ game_should_run :: proc() -> bool {
 
 @(export)
 game_shutdown :: proc() {
+	// Clean up physics resources
+	if g_mem.physics_world != nil {
+		destroy_physics_world(g_mem.physics_world)
+	}
+	delete(g_mem.physics_bodies)
+	
 	free(g_mem)
 }
 

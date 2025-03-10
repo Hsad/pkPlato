@@ -6,6 +6,11 @@ import "core:math/linalg"
 Vector3 :: [3]f32
 Quaternion :: [4]f32
 
+Shape_Type :: enum {
+    Box,
+    Sphere,
+}
+
 RigidBody :: struct {
     // Position and orientation
     position: Vector3,
@@ -27,6 +32,10 @@ RigidBody :: struct {
     restitution: f32,
     static_friction: f32,
     dynamic_friction: f32,
+    
+    // Shape information
+    shape_type: Shape_Type,
+    shape_size: Vector3,  // For box: half-extents, For sphere: x component is radius
 }
 
 Contact :: struct {
@@ -371,4 +380,335 @@ solve_xpbd :: proc(bodies: []RigidBody, contacts: []Contact, dt: f32) {
     for i := 0; i < len(contacts); i += 1 {
         apply_dynamic_friction(&contacts[i], dt)
     }
+}
+
+// Physics world to manage all bodies and contacts
+PhysicsWorld :: struct {
+    bodies: [dynamic]RigidBody,
+    contacts: [dynamic]Contact,
+}
+
+// Create a new physics world
+create_physics_world :: proc() -> ^PhysicsWorld {
+    world := new(PhysicsWorld)
+    world.bodies = make([dynamic]RigidBody)
+    world.contacts = make([dynamic]Contact)
+    return world
+}
+
+// Destroy a physics world and free its resources
+destroy_physics_world :: proc(world: ^PhysicsWorld) {
+    delete(world.bodies)
+    delete(world.contacts)
+    free(world)
+}
+
+// Create a box rigid body
+create_box :: proc(world: ^PhysicsWorld, position: Vector3, size: Vector3, mass: f32) -> int {
+    body := RigidBody{
+        position = position,
+        position_prev = position,
+        orientation = {0, 0, 0, 1}, // Identity quaternion
+        orientation_prev = {0, 0, 0, 1},
+        linear_velocity = {0, 0, 0},
+        angular_velocity = {0, 0, 0},
+        mass = mass,
+        restitution = 0.5,
+        static_friction = 0.5,
+        dynamic_friction = 0.3,
+        shape_type = .Box,
+        shape_size = size * 0.5,  // Convert to half-extents
+    }
+    
+    // Calculate inverse mass (0 for static objects)
+    if mass <= 0 {
+        body.inverse_mass = 0
+    } else {
+        body.inverse_mass = 1.0 / mass
+    }
+    
+    // Calculate inertia tensor for a box
+    // This is a simplified calculation - a proper implementation would use the box dimensions
+    ix := (1.0/12.0) * mass * (size[1]*size[1] + size[2]*size[2])
+    iy := (1.0/12.0) * mass * (size[0]*size[0] + size[2]*size[2])
+    iz := (1.0/12.0) * mass * (size[0]*size[0] + size[1]*size[1])
+    
+    body.inertia_tensor = matrix[3, 3]f32{
+        ix, 0, 0,
+        0, iy, 0,
+        0, 0, iz,
+    }
+    
+    // Calculate inverse inertia tensor
+    if mass <= 0 {
+        body.inverse_inertia_tensor = {}
+    } else {
+        body.inverse_inertia_tensor = matrix[3, 3]f32{
+            1/ix, 0, 0,
+            0, 1/iy, 0,
+            0, 0, 1/iz,
+        }
+    }
+    
+    append(&world.bodies, body)
+    return len(world.bodies) - 1
+}
+
+// Create a sphere rigid body
+create_sphere :: proc(world: ^PhysicsWorld, position: Vector3, radius: f32, mass: f32) -> int {
+    body := RigidBody{
+        position = position,
+        position_prev = position,
+        orientation = {0, 0, 0, 1}, // Identity quaternion
+        orientation_prev = {0, 0, 0, 1},
+        linear_velocity = {0, 0, 0},
+        angular_velocity = {0, 0, 0},
+        mass = mass,
+        restitution = 0.7,
+        static_friction = 0.3,
+        dynamic_friction = 0.2,
+        shape_type = .Sphere,
+        shape_size = {radius, 0, 0},  // Store radius in x component
+    }
+    
+    // Calculate inverse mass (0 for static objects)
+    if mass <= 0 {
+        body.inverse_mass = 0
+    } else {
+        body.inverse_mass = 1.0 / mass
+    }
+    
+    // Calculate inertia tensor for a sphere
+    inertia := (2.0/5.0) * mass * radius * radius
+    
+    body.inertia_tensor = matrix[3, 3]f32{
+        inertia, 0, 0,
+        0, inertia, 0,
+        0, 0, inertia,
+    }
+    
+    // Calculate inverse inertia tensor
+    if mass <= 0 {
+        body.inverse_inertia_tensor = {}
+    } else {
+        body.inverse_inertia_tensor = matrix[3, 3]f32{
+            1/inertia, 0, 0,
+            0, 1/inertia, 0,
+            0, 0, 1/inertia,
+        }
+    }
+    
+    append(&world.bodies, body)
+    return len(world.bodies) - 1
+}
+
+// Set velocity for a rigid body
+set_velocity :: proc(world: ^PhysicsWorld, body_index: int, linear_velocity: Vector3, angular_velocity: Vector3) {
+    if body_index >= 0 && body_index < len(world.bodies) {
+        world.bodies[body_index].linear_velocity = linear_velocity
+        world.bodies[body_index].angular_velocity = angular_velocity
+    }
+}
+
+// Get position of a rigid body
+get_position :: proc(world: ^PhysicsWorld, body_index: int) -> Vector3 {
+    if body_index >= 0 && body_index < len(world.bodies) {
+        return world.bodies[body_index].position
+    }
+    return {0, 0, 0}
+}
+
+// Get orientation of a rigid body
+get_orientation :: proc(world: ^PhysicsWorld, body_index: int) -> Quaternion {
+    if body_index >= 0 && body_index < len(world.bodies) {
+        return world.bodies[body_index].orientation
+    }
+    return {0, 0, 0, 1}
+}
+
+// Get velocity of a rigid body
+get_velocity :: proc(world: ^PhysicsWorld, body_index: int) -> Vector3 {
+    if body_index >= 0 && body_index < len(world.bodies) {
+        return world.bodies[body_index].linear_velocity
+    }
+    return {0, 0, 0}
+}
+
+// Add collision detection helper functions
+detect_sphere_sphere :: proc(a, b: ^RigidBody) -> (bool, Contact) {
+    delta := a.position - b.position
+    distance_squared := linalg.dot(delta, delta)
+    
+    radius_sum := a.shape_size.x + b.shape_size.x
+    
+    if distance_squared < radius_sum * radius_sum {
+        distance := math.sqrt(distance_squared)
+        normal := delta / distance
+        
+        contact := Contact{
+            body_a = a,
+            body_b = b,
+            normal = normal,
+            penetration = radius_sum - distance,
+            static_friction = (a.static_friction + b.static_friction) * 0.5,
+            dynamic_friction = (a.dynamic_friction + b.dynamic_friction) * 0.5,
+            local_point_a = normal * -a.shape_size.x,
+            local_point_b = normal * b.shape_size.x,
+        }
+        
+        return true, contact
+    }
+    
+    return false, Contact{}
+}
+
+detect_box_sphere :: proc(box, sphere: ^RigidBody) -> (bool, Contact) {
+    // Find closest point on box to sphere center
+    closest := Vector3{
+        clamp(sphere.position.x, box.position.x - box.shape_size.x, box.position.x + box.shape_size.x),
+        clamp(sphere.position.y, box.position.y - box.shape_size.y, box.position.y + box.shape_size.y),
+        clamp(sphere.position.z, box.position.z - box.shape_size.z, box.position.z + box.shape_size.z),
+    }
+    
+    // Vector from closest point to sphere center
+    delta := sphere.position - closest
+    dist_squared := linalg.dot(delta, delta)
+    
+    if dist_squared < sphere.shape_size.x * sphere.shape_size.x {
+        dist := math.sqrt(dist_squared)
+        normal := delta
+        if dist > 0 {
+            normal = delta / dist
+        } else {
+            normal = {0, 1, 0}
+        }
+        
+        contact := Contact{
+            body_a = sphere,
+            body_b = box,
+            normal = normal,
+            penetration = sphere.shape_size.x - dist,
+            static_friction = (sphere.static_friction + box.static_friction) * 0.5,
+            dynamic_friction = (sphere.dynamic_friction + box.dynamic_friction) * 0.5,
+            local_point_a = normal * -sphere.shape_size.x,
+            local_point_b = closest - box.position,
+        }
+        
+        return true, contact
+    }
+    
+    return false, Contact{}
+}
+
+detect_box_box :: proc(a, b: ^RigidBody) -> (bool, Contact) {
+    // For now, we'll implement AABB vs AABB collision
+    // Later this could be extended to handle oriented boxes using SAT
+    
+    // Check for overlap on each axis
+    overlap_x := a.shape_size.x + b.shape_size.x - 
+                 abs(a.position.x - b.position.x)
+    overlap_y := a.shape_size.y + b.shape_size.y - 
+                 abs(a.position.y - b.position.y)
+    overlap_z := a.shape_size.z + b.shape_size.z - 
+                 abs(a.position.z - b.position.z)
+    
+    // If there's no overlap on any axis, no collision
+    if overlap_x <= 0 || overlap_y <= 0 || overlap_z <= 0 {
+        return false, Contact{}
+    }
+    
+    // Find smallest overlap to determine collision normal
+    normal := Vector3{0, 1, 0}
+    penetration := overlap_y
+    
+    if overlap_x < overlap_y && overlap_x < overlap_z {
+        penetration = overlap_x
+        normal = {1, 0, 0}
+        if a.position.x < b.position.x {
+            normal = {-1, 0, 0}
+        }
+    } else if overlap_z < overlap_y {
+        penetration = overlap_z
+        normal = {0, 0, 1}
+        if a.position.z < b.position.z {
+            normal = {0, 0, -1}
+        }
+    } else {
+        if a.position.y < b.position.y {
+            normal = {0, -1, 0}
+        }
+    }
+    
+    // Find contact point (center of overlap region)
+    min_b := b.position - b.shape_size
+    max_b := b.position + b.shape_size
+    
+    // Project point a onto box b's bounds
+    contact_point := Vector3{
+        clamp(a.position.x, min_b.x, max_b.x),
+        clamp(a.position.y, min_b.y, max_b.y), 
+        clamp(a.position.z, min_b.z, max_b.z),
+    }
+    contact := Contact{
+        body_a = a,
+        body_b = b,
+        normal = normal,
+        penetration = penetration,
+        static_friction = (a.static_friction + b.static_friction) * 0.5,
+        dynamic_friction = (a.dynamic_friction + b.dynamic_friction) * 0.5,
+        local_point_a = contact_point - a.position,
+        local_point_b = contact_point - b.position,
+    }
+    
+    return true, contact
+}
+
+// Update detect_contacts to use shape types
+detect_contacts :: proc(world: ^PhysicsWorld) {
+    clear(&world.contacts)
+    
+    for i := 0; i < len(world.bodies); i += 1 {
+        for j := i + 1; j < len(world.bodies); j += 1 {
+            body_a := &world.bodies[i]
+            body_b := &world.bodies[j]
+            
+            // Skip if both bodies are static
+            if body_a.inverse_mass == 0 && body_b.inverse_mass == 0 {
+                continue
+            }
+            
+            has_contact := false
+            contact: Contact
+            
+            // Choose collision detection based on shape types
+            if body_a.shape_type == .Sphere && body_b.shape_type == .Sphere {
+                has_contact, contact = detect_sphere_sphere(body_a, body_b)
+            } else if body_a.shape_type == .Box && body_b.shape_type == .Sphere {
+                has_contact, contact = detect_box_sphere(body_a, body_b)
+            } else if body_a.shape_type == .Sphere && body_b.shape_type == .Box {
+                has_contact, contact = detect_box_sphere(body_b, body_a)
+                if has_contact {
+                    // Swap normal direction since we swapped bodies
+                    contact.normal = -contact.normal
+                    contact.body_a = body_a
+                    contact.body_b = body_b
+                }
+            } else if body_a.shape_type == .Box && body_b.shape_type == .Box {
+                has_contact, contact = detect_box_box(body_a, body_b)
+            }
+            
+            if has_contact {
+                append(&world.contacts, contact)
+            }
+        }
+    }
+}
+
+// Update the physics world by one time step
+update_physics :: proc(world: ^PhysicsWorld, dt: f32) {
+    // Detect collisions and generate contacts
+    detect_contacts(world)
+    
+    // Solve the system using XPBD
+    solve_xpbd(world.bodies[:], world.contacts[:], dt)
 }
