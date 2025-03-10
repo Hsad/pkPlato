@@ -33,6 +33,9 @@ RigidBody :: struct {
     static_friction: f32,
     dynamic_friction: f32,
     
+    // Compliance parameters for XPBD
+    compliance: f32,  // Material compliance (inverse of stiffness)
+    
     // Shape information
     shape_type: Shape_Type,
     shape_size: Vector3,  // For box: half-extents, For sphere: x component is radius
@@ -90,9 +93,11 @@ cross :: proc(a, b: Vector3) -> Vector3 {
 
 // Transform a vector using the rotation represented by a quaternion
 rotate_vector :: proc(q: Quaternion, v: Vector3) -> Vector3 {
-    // Implementation of quaternion rotation
-    // For a complete implementation, use a proper quaternion library
-    return v // Simplified for clarity
+    // Proper quaternion rotation: q * v * q^-1
+    // Using the formula: v' = v + 2 * cross(q.xyz, cross(q.xyz, v) + q.w * v)
+    qv := Vector3{q[0], q[1], q[2]}
+    t := cross(qv, cross(qv, v) + v * q[3]) * 2.0
+    return v + t
 }
 
 // Main contact constraint handling function
@@ -144,10 +149,15 @@ solve_contact :: proc(contact: ^Contact, dt: f32) {
     
     // ------ Normal constraint (non-penetration) ------
     
-    // Calculate positional correction
-    alpha := f32(0.0)  // Explicitly use f32
-    alpha_prime := alpha / (dt * dt)
-    delta_lambda := (-d - alpha_prime * contact.lambda_normal) / (w + alpha_prime)
+    // Calculate positional correction using XPBD
+    // Combine compliance from both bodies
+    combined_compliance := body_a.compliance + body_b.compliance
+    
+    // Convert compliance to alpha_tilde (α̃ = α/h²)
+    alpha_tilde := combined_compliance / (dt * dt)
+    
+    // XPBD constraint update: Δλ = (-c - α̃λ) / (w + α̃)
+    delta_lambda := (-d - alpha_tilde * contact.lambda_normal) / (w + alpha_tilde)
     contact.lambda_normal += delta_lambda
     
     // Apply positional correction for normal constraint
@@ -156,12 +166,42 @@ solve_contact :: proc(contact: ^Contact, dt: f32) {
     // Apply to bodies
     if body_a.inverse_mass > 0 {
         body_a.position += impulse * body_a.inverse_mass
-        body_a.orientation = apply_angular_impulse(body_a, cross(r1, impulse))
+        
+        // Apply angular correction
+        angular_impulse := cross(r1, impulse)
+        angular_correction := linalg.matrix_mul_vector(body_a.inverse_inertia_tensor, angular_impulse)
+        
+        // Create quaternion from angular correction
+        delta_q := Quaternion{
+            angular_correction[0] * 0.5,
+            angular_correction[1] * 0.5,
+            angular_correction[2] * 0.5,
+            0,
+        }
+        
+        // Apply to orientation
+        body_a.orientation = quaternion_multiply(delta_q, body_a.orientation)
+        body_a.orientation = normalize_quaternion(body_a.orientation)
     }
     
     if body_b.inverse_mass > 0 {
         body_b.position -= impulse * body_b.inverse_mass
-        body_b.orientation = apply_angular_impulse(body_b, cross(r2, -impulse))
+        
+        // Apply angular correction
+        angular_impulse := cross(r2, -impulse)
+        angular_correction := linalg.matrix_mul_vector(body_b.inverse_inertia_tensor, angular_impulse)
+        
+        // Create quaternion from angular correction
+        delta_q := Quaternion{
+            angular_correction[0] * 0.5,
+            angular_correction[1] * 0.5,
+            angular_correction[2] * 0.5,
+            0,
+        }
+        
+        // Apply to orientation
+        body_b.orientation = quaternion_multiply(delta_q, body_b.orientation)
+        body_b.orientation = normalize_quaternion(body_b.orientation)
     }
     
     // ------ Static friction constraint (position level) ------
@@ -200,25 +240,77 @@ solve_contact :: proc(contact: ^Contact, dt: f32) {
                 return
             }
             
-            // Calculate impulse magnitude
+            // Calculate impulse magnitude using XPBD
+            // For friction, we typically use zero compliance (infinite stiffness)
             delta_lambda_t := -linalg.length(tangent_correction) / w_t
+            
+            // Clamp to friction cone
+            max_lambda_t := combined_static_friction * contact.lambda_normal
+            delta_lambda_t = math.max(-max_lambda_t - contact.lambda_tangent, 
+                                     math.min(delta_lambda_t, max_lambda_t - contact.lambda_tangent))
             
             // Apply impulse
             impulse_t := tangent * delta_lambda_t
             
             if body_a.inverse_mass > 0 {
                 body_a.position += impulse_t * body_a.inverse_mass
-                body_a.orientation = apply_angular_impulse(body_a, cross(r1, impulse_t))
+                
+                // Apply angular correction
+                angular_impulse := cross(r1, impulse_t)
+                angular_correction := linalg.matrix_mul_vector(body_a.inverse_inertia_tensor, angular_impulse)
+                
+                // Create quaternion from angular correction
+                delta_q := Quaternion{
+                    angular_correction[0] * 0.5,
+                    angular_correction[1] * 0.5,
+                    angular_correction[2] * 0.5,
+                    0,
+                }
+                
+                // Apply to orientation
+                body_a.orientation = quaternion_multiply(delta_q, body_a.orientation)
+                body_a.orientation = normalize_quaternion(body_a.orientation)
             }
             
             if body_b.inverse_mass > 0 {
                 body_b.position -= impulse_t * body_b.inverse_mass
-                body_b.orientation = apply_angular_impulse(body_b, cross(r2, -impulse_t))
+                
+                // Apply angular correction
+                angular_impulse := cross(r2, -impulse_t)
+                angular_correction := linalg.matrix_mul_vector(body_b.inverse_inertia_tensor, angular_impulse)
+                
+                // Create quaternion from angular correction
+                delta_q := Quaternion{
+                    angular_correction[0] * 0.5,
+                    angular_correction[1] * 0.5,
+                    angular_correction[2] * 0.5,
+                    0,
+                }
+                
+                // Apply to orientation
+                body_b.orientation = quaternion_multiply(delta_q, body_b.orientation)
+                body_b.orientation = normalize_quaternion(body_b.orientation)
             }
             
             // Track accumulated tangent impulse magnitude
             contact.lambda_tangent += delta_lambda_t
         }
+    }
+}
+
+// Normalize a quaternion
+normalize_quaternion :: proc(q: Quaternion) -> Quaternion {
+    length := math.sqrt(
+        q[0] * q[0] +
+        q[1] * q[1] +
+        q[2] * q[2] +
+        q[3] * q[3])
+    
+    return {
+        q[0] / length,
+        q[1] / length,
+        q[2] / length,
+        q[3] / length,
     }
 }
 
@@ -296,14 +388,14 @@ apply_dynamic_friction :: proc(contact: ^Contact, dt: f32) {
 
 // Apply angular impulse to a rigid body
 apply_angular_impulse :: proc(body: ^RigidBody, angular_impulse: Vector3) -> Quaternion {
-    // This is a simplified implementation
-    // In a complete version, we would properly integrate the angular velocity
-    // and update the quaternion
-    
-    delta_rotation := Quaternion{0, 0, 0, 1} // Identity quaternion
-    
-    // In a real implementation, update the quaternion based on angular impulse
-    // delta_rotation = compute_delta_rotation(body, angular_impulse)
+    // Convert angular impulse to a quaternion change
+    // For small rotations: dq = [0.5 * dt * ω, 0] * q
+    delta_rotation := Quaternion{
+        angular_impulse[0] * 0.5,
+        angular_impulse[1] * 0.5,
+        angular_impulse[2] * 0.5,
+        0,
+    }
     
     // Combine with current orientation
     new_orientation := quaternion_multiply(delta_rotation, body.orientation)
@@ -314,6 +406,7 @@ apply_angular_impulse :: proc(body: ^RigidBody, angular_impulse: Vector3) -> Qua
         new_orientation[1] * new_orientation[1] +
         new_orientation[2] * new_orientation[2] +
         new_orientation[3] * new_orientation[3])
+    
     return {
         new_orientation[0] / length,
         new_orientation[1] / length,
@@ -332,8 +425,103 @@ quaternion_multiply :: proc(a, b: Quaternion) -> Quaternion {
     }
 }
 
+// Integrate quaternion with angular velocity
+integrate_quaternion :: proc(q: Quaternion, angular_velocity: Vector3, dt: f32) -> Quaternion {
+    // Create a quaternion from angular velocity
+    // For small time steps: dq = [0.5 * dt * ω, 0] * q
+    omega_quat := Quaternion{
+        angular_velocity[0] * dt * 0.5,
+        angular_velocity[1] * dt * 0.5,
+        angular_velocity[2] * dt * 0.5,
+        0,
+    }
+    
+    // Apply to current quaternion
+    result := quaternion_multiply(omega_quat, q)
+    
+    // Normalize to ensure unit quaternion
+    length := math.sqrt(
+        result[0] * result[0] +
+        result[1] * result[1] +
+        result[2] * result[2] +
+        result[3] * result[3])
+    
+    return {
+        result[0] / length,
+        result[1] / length,
+        result[2] / length,
+        result[3] / length,
+    }
+}
+
+// Apply restitution at velocity level
+apply_restitution :: proc(contact: ^Contact, dt: f32) {
+    // Calculate relative velocity at contact point
+    rel_vel := calculate_relative_velocity(contact)
+    
+    // Extract normal component of relative velocity
+    normal_vel := linalg.dot(rel_vel, contact.normal)
+    
+    // Skip if separating (positive normal velocity)
+    if normal_vel >= 0 {
+        return
+    }
+    
+    // Bodies involved
+    body_a := contact.body_a
+    body_b := contact.body_b
+    
+    // Skip if both bodies have infinite mass
+    if body_a.inverse_mass == 0 && body_b.inverse_mass == 0 {
+        return
+    }
+    
+    // Vectors from center of mass to contact points
+    r1 := transform_point(body_a, contact.local_point_a) - body_a.position
+    r2 := transform_point(body_b, contact.local_point_b) - body_b.position
+    
+    // Calculate generalized inverse masses
+    r1_cross_n := cross(r1, contact.normal)
+    r2_cross_n := cross(r2, contact.normal)
+    
+    w1 := body_a.inverse_mass + linalg.dot(r1_cross_n, linalg.matrix_mul_vector(body_a.inverse_inertia_tensor, r1_cross_n))
+    w2 := body_b.inverse_mass + linalg.dot(r2_cross_n, linalg.matrix_mul_vector(body_b.inverse_inertia_tensor, r2_cross_n))
+    
+    // Combined inverse mass
+    w := w1 + w2
+    
+    // Skip if infinite mass
+    if w <= 0 {
+        return
+    }
+    
+    // Compute combined restitution coefficient
+    combined_restitution := math.max(body_a.restitution, body_b.restitution)
+    
+    // Calculate restitution impulse
+    // The target velocity is -restitution * normal_vel
+    delta_vel := -normal_vel * (1.0 + combined_restitution)
+    
+    // Calculate impulse magnitude
+    impulse_magnitude := delta_vel / w
+    
+    // Apply impulse
+    impulse := contact.normal * impulse_magnitude
+    
+    // Apply to linear velocities
+    if body_a.inverse_mass > 0 {
+        body_a.linear_velocity += impulse * body_a.inverse_mass
+        body_a.angular_velocity += linalg.matrix_mul_vector(body_a.inverse_inertia_tensor, cross(r1, impulse))
+    }
+    
+    if body_b.inverse_mass > 0 {
+        body_b.linear_velocity -= impulse * body_b.inverse_mass
+        body_b.angular_velocity -= linalg.matrix_mul_vector(body_b.inverse_inertia_tensor, cross(r2, impulse))
+    }
+}
+
 // Main XPBD solver function
-solve_xpbd :: proc(bodies: []RigidBody, contacts: []Contact, dt: f32) {
+solve_xpbd :: proc(bodies: []RigidBody, contacts: []Contact, dt: f32, iterations: int = 1, gravity: Vector3 = {0, -9.81, 0}) {
     // Store previous state for all bodies
     for i := 0; i < len(bodies); i += 1 {
         bodies[i].position_prev = bodies[i].position
@@ -344,20 +532,17 @@ solve_xpbd :: proc(bodies: []RigidBody, contacts: []Contact, dt: f32) {
     for i := 0; i < len(bodies); i += 1 {
         if bodies[i].inverse_mass > 0 {
             // Apply gravity
-            gravity := Vector3{0, -9.81, 0}
             bodies[i].linear_velocity += gravity * dt
             
             // Integrate positions
             bodies[i].position += bodies[i].linear_velocity * dt
             
-            // Integrate orientations (simplified)
-            // In a complete implementation, use proper quaternion integration
-            bodies[i].orientation = apply_angular_impulse(&bodies[i], bodies[i].angular_velocity * dt)
+            // Integrate orientations using proper quaternion integration
+            bodies[i].orientation = integrate_quaternion(bodies[i].orientation, bodies[i].angular_velocity, dt)
         }
     }
     
     // Position-based solver iterations
-    iterations := 20  // Adjust based on desired stability/performance
     for iter := 0; iter < iterations; iter += 1 {
         // Solve all contact constraints
         for i := 0; i < len(contacts); i += 1 {
@@ -371,12 +556,28 @@ solve_xpbd :: proc(bodies: []RigidBody, contacts: []Contact, dt: f32) {
             // Linear velocity update
             bodies[i].linear_velocity = (bodies[i].position - bodies[i].position_prev) / dt
             
-            // Angular velocity update (simplified)
-            // In a full implementation, derive angular velocity from quaternions
+            // Angular velocity update from quaternion difference
+            // Extract angular velocity from quaternion difference
+            q_diff := quaternion_multiply(bodies[i].orientation, quaternion_conjugate(bodies[i].orientation_prev))
+            
+            // For small rotations, angular velocity can be approximated as:
+            // ω = 2 * q_diff.xyz / dt (when q_diff.w is close to 1)
+            bodies[i].angular_velocity = {
+                q_diff[0] * 2.0 / dt,
+                q_diff[1] * 2.0 / dt,
+                q_diff[2] * 2.0 / dt,
+            }
         }
     }
     
-    // Velocity-based solver for dynamic friction
+    // Apply velocity-level constraints
+    
+    // Apply restitution
+    for i := 0; i < len(contacts); i += 1 {
+        apply_restitution(&contacts[i], dt)
+    }
+    
+    // Apply dynamic friction
     for i := 0; i < len(contacts); i += 1 {
         apply_dynamic_friction(&contacts[i], dt)
     }
@@ -386,6 +587,11 @@ solve_xpbd :: proc(bodies: []RigidBody, contacts: []Contact, dt: f32) {
 PhysicsWorld :: struct {
     bodies: [dynamic]RigidBody,
     contacts: [dynamic]Contact,
+    
+    // Solver configuration
+    num_substeps: int,           // Number of substeps per update
+    iterations_per_substep: int, // Number of constraint iterations per substep
+    gravity: Vector3,            // Gravity vector
 }
 
 // Create a new physics world
@@ -393,7 +599,20 @@ create_physics_world :: proc() -> ^PhysicsWorld {
     world := new(PhysicsWorld)
     world.bodies = make([dynamic]RigidBody)
     world.contacts = make([dynamic]Contact)
+    
+    // Default configuration
+    world.num_substeps = 10
+    world.iterations_per_substep = 1
+    world.gravity = {0, -9.81, 0}
+    
     return world
+}
+
+// Configure the physics world
+configure_physics_world :: proc(world: ^PhysicsWorld, num_substeps: int, iterations_per_substep: int, gravity: Vector3) {
+    world.num_substeps = num_substeps
+    world.iterations_per_substep = iterations_per_substep
+    world.gravity = gravity
 }
 
 // Destroy a physics world and free its resources
@@ -403,8 +622,8 @@ destroy_physics_world :: proc(world: ^PhysicsWorld) {
     free(world)
 }
 
-// Create a box rigid body
-create_box :: proc(world: ^PhysicsWorld, position: Vector3, size: Vector3, mass: f32) -> int {
+// Create a box rigid body with compliance parameter
+create_box :: proc(world: ^PhysicsWorld, position: Vector3, size: Vector3, mass: f32, compliance: f32 = 0.01) -> int {
     body := RigidBody{
         position = position,
         position_prev = position,
@@ -416,6 +635,7 @@ create_box :: proc(world: ^PhysicsWorld, position: Vector3, size: Vector3, mass:
         restitution = 0.5,
         static_friction = 0.5,
         dynamic_friction = 0.3,
+        compliance = compliance,  // Use provided compliance value
         shape_type = .Box,
         shape_size = size * 0.5,  // Convert to half-extents
     }
@@ -454,8 +674,8 @@ create_box :: proc(world: ^PhysicsWorld, position: Vector3, size: Vector3, mass:
     return len(world.bodies) - 1
 }
 
-// Create a sphere rigid body
-create_sphere :: proc(world: ^PhysicsWorld, position: Vector3, radius: f32, mass: f32) -> int {
+// Create a sphere rigid body with compliance parameter
+create_sphere :: proc(world: ^PhysicsWorld, position: Vector3, radius: f32, mass: f32, compliance: f32 = 0.005) -> int {
     body := RigidBody{
         position = position,
         position_prev = position,
@@ -467,6 +687,7 @@ create_sphere :: proc(world: ^PhysicsWorld, position: Vector3, radius: f32, mass
         restitution = 0.7,
         static_friction = 0.3,
         dynamic_friction = 0.2,
+        compliance = compliance,  // Use provided compliance value
         shape_type = .Sphere,
         shape_size = {radius, 0, 0},  // Store radius in x component
     }
@@ -706,9 +927,37 @@ detect_contacts :: proc(world: ^PhysicsWorld) {
 
 // Update the physics world by one time step
 update_physics :: proc(world: ^PhysicsWorld, dt: f32) {
-    // Detect collisions and generate contacts
-    detect_contacts(world)
+    // Use the configured number of substeps and iterations
+    substep_dt := dt / f32(world.num_substeps)
     
-    // Solve the system using XPBD
-    solve_xpbd(world.bodies[:], world.contacts[:], dt)
+    // Run the simulation for each substep
+    for substep := 0; substep < world.num_substeps; substep += 1 {
+        // Detect collisions and generate contacts
+        detect_contacts(world)
+        
+        // Solve the system using XPBD with configured iterations
+        solve_xpbd(world.bodies[:], world.contacts[:], substep_dt, world.iterations_per_substep, world.gravity)
+    }
+}
+
+// Quaternion conjugate (inverse for unit quaternions)
+quaternion_conjugate :: proc(q: Quaternion) -> Quaternion {
+    return {-q[0], -q[1], -q[2], q[3]}
+}
+
+// Set material properties for a rigid body
+set_material_properties :: proc(world: ^PhysicsWorld, body_index: int, restitution: f32, static_friction: f32, dynamic_friction: f32, compliance: f32) {
+    if body_index >= 0 && body_index < len(world.bodies) {
+        world.bodies[body_index].restitution = restitution
+        world.bodies[body_index].static_friction = static_friction
+        world.bodies[body_index].dynamic_friction = dynamic_friction
+        world.bodies[body_index].compliance = compliance
+    }
+}
+
+// Set compliance for a rigid body
+set_compliance :: proc(world: ^PhysicsWorld, body_index: int, compliance: f32) {
+    if body_index >= 0 && body_index < len(world.bodies) {
+        world.bodies[body_index].compliance = compliance
+    }
 }
