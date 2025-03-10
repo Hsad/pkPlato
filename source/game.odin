@@ -47,6 +47,13 @@ Game_Memory :: struct {
 	run: bool,
 	debug: Debug_data,
 	ground_model: rl.Model,
+	test_ball_pos: rl.Vector3,
+	test_ball_vel: rl.Vector3,
+	pbd_objects: [dynamic]PBD_Object,
+	constraints: [dynamic]Constraint,
+	objects: [dynamic]Object,
+	substeps: int,
+	ground_boxes: [dynamic]AABB,
 }
 
 g_mem: ^Game_Memory
@@ -78,6 +85,16 @@ game_init :: proc() {
 	ground_model := rl.LoadModelFromMesh(ground_mesh)
 	//ground_model.materials = rl.LoadMaterialDefault()
 	ground_model.materials[0].maps[0].texture = rl.LoadTextureFromImage(ground_img)
+
+
+	ground_boxes := [dynamic]AABB{}
+	for _ in 0..<10 {
+		for _ in 0..<10 {
+			center := rl.Vector3{f32(rl.GetRandomValue(-50, 50)), 0, f32(rl.GetRandomValue(-50, 50))}
+			append(&ground_boxes, AABB{min = {center.x - 1, 0, center.z - 1}, max = {center.x + 1, 5, center.z + 1}})
+		}
+	}
+
 	g_mem^ = Game_Memory {
 		run = true,
 		some_number = 100,
@@ -87,24 +104,53 @@ game_init :: proc() {
 		player_texture = rl.LoadTexture("assets/round_cat.png"),
 		player_look_target = {10, 0, 0},  // Initialize some distance in front of default spawn
 		ground_model = ground_model,
+		ground_boxes = ground_boxes,
 	}
 
 	game_hot_reloaded(g_mem)
 }
 
 update :: proc() {
+	// input_intent?
 	controller_input()
 	
+	// before or after physics?
 	calc_camera()
 
 	{
+		gravity :: rl.Vector3{0, -9.8, 0}
+		dt := rl.GetFrameTime()
 		//verlet integration, position based dynamics
-		//old_ball_pos := g_mem.test_ball_pos
-		//g_mem.test_ball_pos.y += gravity * rl.GetFrameTime()
+		//g_mem.test_ball_pos += gravity * rl.GetFrameTime()
+		
+		//perdict position; velocity + external forces
+		old_ball_pos := g_mem.test_ball_pos
+		forces := g_mem.test_ball_vel + (dt * gravity)
+		predicted_pos := old_ball_pos + forces * dt
+		
+		//constran prediction; limits
+		g_mem.test_ball_pos = predicted_pos
+		// floor
+		floor_bounce := false
+		if predicted_pos.y < 0 {
+			predicted_pos.y = 0
+			floor_bounce = true
+		}
 
+		//velocity from motion; (new - old) dt
+		g_mem.test_ball_vel = (predicted_pos - old_ball_pos) / dt
 
-
+		//floor
+		if floor_bounce {
+			//predicted_pos.y = 0
+			g_mem.test_ball_vel.y = -g_mem.test_ball_vel.y * 0.8
+		}
+		
+		
 	}
+
+	simulate_ball_on_floor()
+
 
 	//Simulate gravity / forces
 	//Check collisions
@@ -134,6 +180,15 @@ draw :: proc() {
 	// Draw the look target as a small yellow sphere
 	rl.DrawLine3D(g_mem.player_pos, g_mem.player_look_target, rl.YELLOW)
 	rl.DrawSphere(g_mem.player_look_target, 0.3, rl.YELLOW)
+
+	// Draw the ground boxes
+	for box in g_mem.ground_boxes {
+		size := box.max - box.min 
+		rl.DrawCubeV(box.min, size, rl.WHITE)
+	}
+
+	// TEST BALL
+	rl.DrawSphere(g_mem.test_ball_pos, 1.0, rl.RED)
 	
 	rl.EndMode3D()
 
@@ -259,6 +314,15 @@ controller_input :: proc() {
 			g_mem.player_look_target = g_mem.player_pos + linalg.normalize(new_offset) * LOOK_DISTANCE
 		}
 
+		{
+			// jump physics
+			// xbox a button
+			if rl.IsGamepadButtonPressed(0, .RIGHT_FACE_DOWN) {
+				g_mem.test_ball_pos.y += 10
+			}
+
+
+		}
 	}
 	//if rl.IsKeyDown(.UP) || rl.IsKeyDown(.W) {
 	//	input += g_mem.player_look_target

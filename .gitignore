@@ -16,3 +16,5 @@ main_release
 main_debug.exe
 main_debug.bin
 main_debug
+
+temp.odin

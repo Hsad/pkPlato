@@ -17,6 +17,7 @@ pkgs.mkShell
     libglvnd
     git
     bash
+    watchexec
   ];
 
   shellHook = ''
@@ -27,5 +28,6 @@ pkgs.mkShell
     export GDK_BACKEND=wayland
     export SDL_VIDEODRIVER=wayland
     echo "Odin environment running"
+    echo "watchexec -w source/game.odin bash build_hot_reload.sh"
   '';
 }
