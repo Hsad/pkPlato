@@ -54,9 +54,9 @@ Game_Memory :: struct {
 	ground_boxes: [dynamic]AABB,
 	
 	// Physics world
-	physics_world: ^PhysicsWorld,
-	physics_bodies: [dynamic]int,  // Indices into the physics world
-	player_physics_body_index: int, // Index of the player's physics body
+	//physics_world: ^PhysicsWorld,
+	//physics_bodies: [dynamic]int,  // Indices into the physics world
+	//player_physics_body_index: int, // Index of the player's physics body
 
 	//simple pbd
 	pbd_world: ^PBD_World,
@@ -103,51 +103,53 @@ game_init :: proc() {
 
 
 	// Initialize physics world
-	physics_world := create_physics_world()
+	//physics_world := create_physics_world()
 	
 	// Configure physics world for better stability
 	// Increase iterations for more accurate simulation
-	configure_physics_world(physics_world, 20, {0, -9.81, 0})
+	//configure_physics_world(physics_world, 20, {0, -9.81, 0})
 	
-	physics_bodies := make([dynamic]int)
+	//physics_bodies := make([dynamic]int)
 	
 	// Create player physics body (a sphere)
-	player_start_pos := rl.Vector3{0, 5, 0}  // Start a bit higher to see if gravity works
-	player_radius := f32(1.0)
-	player_mass := f32(1.0)  // Even lighter for more responsive movement
-	player_compliance := f32(0.00001)  // Much stiffer for better control
-	player_physics_index := create_sphere(physics_world, player_start_pos, player_radius, player_mass, player_compliance)
+	//player_radius := f32(1.0)
+	//player_mass := f32(1.0)  // Even lighter for more responsive movement
+	//player_compliance := f32(0.00001)  // Much stiffer for better control
+	//player_physics_index := create_sphere(physics_world, player_start_pos, player_radius, player_mass, player_compliance)
 	
 	// Set player material properties for better control
 	// Higher restitution for better bouncing, lower friction for smoother movement
-	set_material_properties(physics_world, player_physics_index, 0.5, 0.2, 0.1, player_compliance)
+	//set_material_properties(physics_world, player_physics_index, 0.5, 0.2, 0.1, player_compliance)
 	
 	// Add player body to the list of physics bodies
-	append(&physics_bodies, player_physics_index)
+	//append(&physics_bodies, player_physics_index)
 	
 	// Create a ground plane (static body)
-	ground_index := create_box(physics_world, {0, -1, 0}, {100, 2.1, 100}, 0, 0.001)
-	append(&physics_bodies, ground_index)
+	//ground_index := create_box(physics_world, {0, -1, 0}, {100, 2.1, 100}, 0, 0.001)
+	//append(&physics_bodies, ground_index)
 	
 	// Create some dynamic boxes with different compliance values
-	for i in 0..<5 {
-		pos := rl.Vector3{f32(rl.GetRandomValue(-20, 20)), f32(50 + i * 2), f32(rl.GetRandomValue(-20, 20))}
-		// Use slightly different compliance values for variety
-		compliance := 0.01 + f32(i) * 0.001
-		box_index := create_box(physics_world, pos, {1, 1, 1}, 1, compliance)
-		append(&physics_bodies, box_index)
-	}
+	//for i in 0..<5 {
+	//	pos := rl.Vector3{f32(rl.GetRandomValue(-20, 20)), f32(50 + i * 2), f32(rl.GetRandomValue(-20, 20))}
+	//	// Use slightly different compliance values for variety
+	//	compliance := 0.01 + f32(i) * 0.001
+	//	box_index := create_box(physics_world, pos, {1, 1, 1}, 1, compliance)
+	//	//append(&physics_bodies, box_index)
+	//}
 	
-	// Create some dynamic spheres with different compliance values
-	for i in 0..<20 {
-		pos := rl.Vector3{f32(rl.GetRandomValue(-20, 20)), f32(15 + i * 2), f32(rl.GetRandomValue(-20, 20))}
-		// Use slightly different compliance values for variety
-		compliance := 0.005 + f32(i) * 0.0005
-		sphere_index := create_sphere(physics_world, pos, 1, 1, compliance)
-		append(&physics_bodies, sphere_index)
-	}
+	//// Create some dynamic spheres with different compliance values
+	//for i in 0..<20 {
+	//	pos := rl.Vector3{f32(rl.GetRandomValue(-20, 20)), f32(15 + i * 2), f32(rl.GetRandomValue(-20, 20))}
+	//	// Use slightly different compliance values for variety
+	//	compliance := 0.005 + f32(i) * 0.0005
+	//	sphere_index := create_sphere(physics_world, pos, 1, 1, compliance)
+	//	//append(&physics_bodies, sphere_index)
+	//}
 
 	pbd_world := pbd_init()
+	player_start_pos := rl.Vector3{0, 5, 0}  // Start a bit higher to see if gravity works
+	append(&pbd_world.points, Point{player_start_pos, player_start_pos, {0, 0, 0}, 1.0, 0})
+	pbd_create_boxes(pbd_world)
 
 	g_mem^ = Game_Memory {
 		run = true,
@@ -161,9 +163,9 @@ game_init :: proc() {
 		camera_pos = {player_start_pos.x - 10, player_start_pos.y + 5, player_start_pos.z},  // Initialize behind player
 		ground_model = ground_model,
 		ground_boxes = ground_boxes,
-		physics_world = physics_world,
-		physics_bodies = physics_bodies,
-		player_physics_body_index = player_physics_index,
+		//physics_world = physics_world,
+		//physics_bodies = physics_bodies,
+		//player_physics_body_index = player_physics_index,
 
 		pbd_world = pbd_world,
 	}
@@ -174,33 +176,34 @@ game_init :: proc() {
 
 update :: proc() {
 	// input_intent?
+	//fmt.println("controller_input")
 	controller_input()
-	
-	// Test force application - press T key to apply a strong upward force
-	if rl.IsKeyPressed(.T) {
-		current_vel := get_velocity(g_mem.physics_world, g_mem.player_physics_body_index)
-		physics_vel := rl.Vector3{current_vel.x, current_vel.y, current_vel.z}
-		physics_vel.y = 100.0  // Strong upward force
-		set_velocity(g_mem.physics_world, g_mem.player_physics_body_index, physics_vel, {0, 0, 0})
-	}
-
+	//fmt.println("pbd_simulate")
 	pbd_simulate(rl.GetFrameTime())
+	//fmt.println("pbd_simulate done")
+
+	hight_change := g_mem.pbd_world.points[0].position.y - g_mem.player_pos.y
+	g_mem.player_pos = g_mem.pbd_world.points[0].position
+	g_mem.player_look_target.y += hight_change
 
 	// Update physics
-	update_physics(g_mem.physics_world, rl.GetFrameTime())
+	//update_physics(g_mem.physics_world, rl.GetFrameTime())
 	
 	// Update player position from physics body
-	physics_pos := get_position(g_mem.physics_world, g_mem.player_physics_body_index)
+	//physics_pos := get_position(g_mem.physics_world, g_mem.player_physics_body_index)
 	//physics_vel := get_velocity(g_mem.physics_world, g_mem.player_physics_body_index)
 	
 	// Debug print
 	//fmt.println("Physics pos:", physics_pos, "Physics vel:", physics_vel)
 	
-	g_mem.player_pos = {physics_pos.x, physics_pos.y, physics_pos.z}
+	//g_mem.player_pos = {physics_pos.x, physics_pos.y, physics_pos.z}
 	
 	// Update camera after player position is updated
+	//fmt.println("calc_camera")
 	calc_camera()
 
+	//fmt.println("g_mem.pbd_world.points: ", len(g_mem.pbd_world.points))
+	//fmt.println("g_mem.pbd_world.springs: ", len(g_mem.pbd_world.springs))
 	// Temporarily comment out AABB collision detection to see if it's interfering
 	/*
 	{
@@ -217,44 +220,6 @@ update :: proc() {
 		}
 	}
 	*/
-
-	{
-		gravity :: rl.Vector3{0, -9.8, 0}
-		dt := rl.GetFrameTime()
-		//verlet integration, position based dynamics
-		//g_mem.test_ball_pos += gravity * rl.GetFrameTime()
-		
-		//perdict position; velocity + external forces
-		old_ball_pos := g_mem.test_ball_pos
-		forces := g_mem.test_ball_vel + (dt * gravity)
-		predicted_pos := old_ball_pos + forces * dt
-		
-		//constran prediction; limits
-		g_mem.test_ball_pos = predicted_pos
-		// floor
-		floor_bounce := false
-		if predicted_pos.y < 0 {
-			predicted_pos.y = 0
-			floor_bounce = true
-		}
-
-		//velocity from motion; (new - old) dt
-		g_mem.test_ball_vel = (predicted_pos - old_ball_pos) / dt
-
-		//floor
-		if floor_bounce {
-			//predicted_pos.y = 0
-			g_mem.test_ball_vel.y = -g_mem.test_ball_vel.y * 0.8
-		}
-		
-		
-	}
-
-
-
-	//Simulate gravity / forces
-	//Check collisions
-	//apply reaction forces
 
 
 	g_mem.some_number += 1
@@ -276,13 +241,13 @@ draw :: proc() {
 	rl.DrawSphere(g_mem.player_pos, 1.0, rl.BLUE)
 	
 	// Draw player velocity vector
-	physics_vel := get_velocity(g_mem.physics_world, g_mem.player_physics_body_index)
-	vel_end := rl.Vector3{
-		g_mem.player_pos.x + physics_vel.x,
-		g_mem.player_pos.y + physics_vel.y,
-		g_mem.player_pos.z + physics_vel.z,
-	}
-	rl.DrawLine3D(g_mem.player_pos, vel_end, rl.MAGENTA)
+	//physics_vel := get_velocity(g_mem.physics_world, g_mem.player_physics_body_index)
+	//vel_end := rl.Vector3{
+	//	g_mem.player_pos.x + physics_vel.x,
+	//	g_mem.player_pos.y + physics_vel.y,
+	//	g_mem.player_pos.z + physics_vel.z,
+	//}
+	//rl.DrawLine3D(g_mem.player_pos, vel_end, rl.MAGENTA)
 	
 	// Draw the ideal camera position as a small green sphere
 	rl.DrawSphere(g_mem.debug.ideal_camera_pos, 0.3, rl.GREEN)
@@ -308,48 +273,48 @@ draw :: proc() {
 		}
 	}
 
-	// Draw physics objects
-	for i := 0; i < len(g_mem.physics_world.bodies); i += 1 {
-		body := g_mem.physics_world.bodies[i]
-		
-		// Convert Vector3 to rl.Vector3
-		pos := rl.Vector3{body.position[0], body.position[1], body.position[2]}
-		
-		// Choose color based on body type
-		color := rl.WHITE
-		if body.inverse_mass == 0 {
-			color = rl.GREEN  // Static bodies
-		} else if body.shape_type == .Sphere {
-			color = rl.BLUE   // Dynamic spheres
-		} else {
-			color = rl.RED    // Dynamic boxes
-		}
-		
-		// Draw with wireframe for better visibility
-		switch body.shape_type {
-		case .Sphere:
-			rl.DrawSphereWires(pos, body.shape_size[0], 8, 8, color)
-			rl.DrawSphere(pos, body.shape_size[0], rl.ColorAlpha(color, 0.5))
-		case .Box:
-			size := rl.Vector3{
-				body.shape_size.x * 2, // Multiply by 2 since shape_size is half-extents
-				body.shape_size.y * 2,
-				body.shape_size.z * 2,
-			}
-			rl.DrawCubeWires(pos, size.x, size.y, size.z, color)
-			rl.DrawCubeV(pos, size, rl.ColorAlpha(color, 0.5))
-		}
-		
-		// Draw velocity vector for debugging
-		if body.inverse_mass > 0 {
-			vel_end = rl.Vector3{
-				pos.x + body.linear_velocity[0],
-				pos.y + body.linear_velocity[1],
-				pos.z + body.linear_velocity[2],
-			}
-			rl.DrawLine3D(pos, vel_end, rl.YELLOW)
-		}
-	}
+	//// Draw physics objects
+	//for i := 0; i < len(g_mem.physics_world.bodies); i += 1 {
+	//	body := g_mem.physics_world.bodies[i]
+	//	
+	//	// Convert Vector3 to rl.Vector3
+	//	pos := rl.Vector3{body.position[0], body.position[1], body.position[2]}
+	//	
+	//	// Choose color based on body type
+	//	color := rl.WHITE
+	//	if body.inverse_mass == 0 {
+	//		color = rl.GREEN  // Static bodies
+	//	} else if body.shape_type == .Sphere {
+	//		color = rl.BLUE   // Dynamic spheres
+	//	} else {
+	//		color = rl.RED    // Dynamic boxes
+	//	}
+	//	
+	//	// Draw with wireframe for better visibility
+	//	switch body.shape_type {
+	//	case .Sphere:
+	//		rl.DrawSphereWires(pos, body.shape_size[0], 8, 8, color)
+	//		rl.DrawSphere(pos, body.shape_size[0], rl.ColorAlpha(color, 0.5))
+	//	case .Box:
+	//		size := rl.Vector3{
+	//			body.shape_size.x * 2, // Multiply by 2 since shape_size is half-extents
+	//			body.shape_size.y * 2,
+	//			body.shape_size.z * 2,
+	//		}
+	//		rl.DrawCubeWires(pos, size.x, size.y, size.z, color)
+	//		rl.DrawCubeV(pos, size, rl.ColorAlpha(color, 0.5))
+	//	}
+	//	
+	//	// Draw velocity vector for debugging
+	//	if body.inverse_mass > 0 {
+	//		vel_end = rl.Vector3{
+	//			pos.x + body.linear_velocity[0],
+	//			pos.y + body.linear_velocity[1],
+	//			pos.z + body.linear_velocity[2],
+	//		}
+	//		rl.DrawLine3D(pos, vel_end, rl.YELLOW)
+	//	}
+	//}
 	
 	rl.EndMode3D()
 
@@ -373,8 +338,8 @@ draw :: proc() {
 	//rl.DrawText(fmt.ctprintf("some_number: %v\nplayer_pos: %v", g_mem.some_number, g_mem.player_pos), 5, 5, 8, rl.WHITE)
 	// frame time and frame rate
 	rl.DrawText(fmt.ctprintf("ft: %v\nfps: %v", rl.GetFrameTime(), rl.GetFPS()), 5, 5, 8, rl.WHITE)
-	rl.DrawText(fmt.ctprintf("player: %v", g_mem.physics_world.bodies[0].position), 5, 30, 8, rl.WHITE)
-	rl.DrawText(fmt.ctprintf("player: %v", g_mem.physics_world.bodies[0].linear_velocity), 5, 45, 8, rl.WHITE)
+	//rl.DrawText(fmt.ctprintf("player: %v", g_mem.physics_world.bodies[0].position), 5, 30, 8, rl.WHITE)
+	//rl.DrawText(fmt.ctprintf("player: %v", g_mem.physics_world.bodies[0].linear_velocity), 5, 45, 8, rl.WHITE)
 
 	rl.EndMode2D()
 
@@ -453,7 +418,10 @@ controller_input :: proc() {
 			input -= right_dir * x * 0.2
 			
 			//fmt.println("Input direction:", input)
+		} else {
+			g_mem.pbd_world.points[0].velocity *= {0.95, 1, 0.95}
 		}
+		
 		
 		// adjust vertical look back to center while moving
 		if is_moving && !is_looking {
@@ -483,9 +451,9 @@ controller_input :: proc() {
 		}
 
 		// Get current velocity from physics system
-		current_vel := get_velocity(g_mem.physics_world, g_mem.player_physics_body_index)
-		physics_vel := rl.Vector3{current_vel.x, current_vel.y, current_vel.z}
-		
+		//current_vel := get_velocity(g_mem.physics_world, g_mem.player_physics_body_index)
+		//physics_vel := rl.Vector3{current_vel.x, current_vel.y, current_vel.z}
+		physics_vel := g_mem.pbd_world.points[0].velocity
 		//fmt.println("Current physics velocity before:", physics_vel)
 		
 		// Apply movement forces to physics body
@@ -518,16 +486,18 @@ controller_input :: proc() {
 			//fmt.println("Applied force:", move_force, "New velocity:", physics_vel)
 			
 			// Apply velocity to physics body
-			set_velocity(g_mem.physics_world, g_mem.player_physics_body_index, physics_vel, {0, 0, 0})
+			//set_velocity(g_mem.physics_world, g_mem.player_physics_body_index, physics_vel, {0, 0, 0})
+			g_mem.pbd_world.points[0].velocity = physics_vel
 		}
 		
 		// Jump physics
 		if rl.IsGamepadButtonPressed(0, .RIGHT_FACE_DOWN) {
 			// Apply upward impulse
-			JUMP_FORCE :: f32(5.0)  // Increased jump force
+			JUMP_FORCE :: f32(15.0)  // Increased jump force
 			physics_vel.y = JUMP_FORCE
 			//fmt.println("Applying jump force:", JUMP_FORCE, "New velocity:", physics_vel)
-			set_velocity(g_mem.physics_world, g_mem.player_physics_body_index, physics_vel, {0, 0, 0})
+			//set_velocity(g_mem.physics_world, g_mem.player_physics_body_index, physics_vel, {0, 0, 0})
+			g_mem.pbd_world.points[0].velocity.y = JUMP_FORCE
 		}
 	}
 	
@@ -576,7 +546,6 @@ calc_camera :: proc() {
 	// Combine components for final camera position
 	g_mem.camera_pos = new_horizontal + new_vertical
 	
-	
 	g_mem.debug.ideal_camera_pos = ideal_camera_pos
 }
 
@@ -611,10 +580,10 @@ game_should_run :: proc() -> bool {
 @(export)
 game_shutdown :: proc() {
 	// Clean up physics resources
-	if g_mem.physics_world != nil {
-		destroy_physics_world(g_mem.physics_world)
-	}
-	delete(g_mem.physics_bodies)
+	//if g_mem.physics_world != nil {
+	//	destroy_physics_world(g_mem.physics_world)
+	//}
+	//delete(g_mem.physics_bodies)
 	
 	if g_mem.pbd_world != nil {
 		pbd_deinit(g_mem.pbd_world)
