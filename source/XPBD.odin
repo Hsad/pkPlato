@@ -3,7 +3,8 @@ package game
 import "core:math"
 import "core:math/linalg"
 import "core:fmt"
-Vector3 :: [3]f32
+import rl "vendor:raylib"
+//Vector3 :: [3]f32
 Quaternion :: [4]f32
 
 Shape_Type :: enum {
@@ -13,14 +14,14 @@ Shape_Type :: enum {
 
 RigidBody :: struct {
     // Position and orientation
-    position: Vector3,
-    position_prev: Vector3,
+    position: rl.Vector3,
+    position_prev: rl.Vector3,
     orientation: Quaternion,
     orientation_prev: Quaternion,
     
     // Velocities
-    linear_velocity: Vector3,
-    angular_velocity: Vector3,
+    linear_velocity: rl.Vector3,
+    angular_velocity: rl.Vector3,
     
     // Physical properties
     mass: f32,
@@ -36,9 +37,33 @@ RigidBody :: struct {
     // Compliance parameters for XPBD
     compliance: f32,  // Material compliance (inverse of stiffness)
     
+    // Damping factor (0 = no damping, 1 = full damping)
+    damping: f32,
+    
     // Shape information
     shape_type: Shape_Type,
-    shape_size: Vector3,  // For box: half-extents, For sphere: x component is radius
+    shape_size: rl.Vector3,  // For box: half-extents, For sphere: x component is radius
+}
+
+// Distance constraint between two rigid bodies
+DistanceConstraint :: struct {
+    // Bodies involved
+    body_a: ^RigidBody,
+    body_b: ^RigidBody,
+    
+    // Attachment points in local coordinates
+    local_point_a: rl.Vector3,
+    local_point_b: rl.Vector3,
+    
+    // Target distance
+    distance: f32,
+    
+    // Constraint properties
+    compliance: f32,
+    unilateral: bool,  // If true, only enforces distance when stretched beyond target
+    
+    // Accumulated impulse for warm starting
+    lambda: f32,
 }
 
 Contact :: struct {
@@ -47,11 +72,11 @@ Contact :: struct {
     body_b: ^RigidBody,
     
     // Contact point in local coordinates
-    local_point_a: Vector3,
-    local_point_b: Vector3,
+    local_point_a: rl.Vector3,
+    local_point_b: rl.Vector3,
     
     // Contact normal and penetration depth
-    normal: Vector3,
+    normal: rl.Vector3,
     penetration: f32,
     
     // Friction coefficients
@@ -64,7 +89,7 @@ Contact :: struct {
 }
 
 // Helper function to transform a local point to world space
-transform_point :: proc(body: ^RigidBody, local_point: Vector3) -> Vector3 {
+transform_point :: proc(body: ^RigidBody, local_point: rl.Vector3) -> rl.Vector3 {
     // Rotate the local point using the body's orientation quaternion
     rotated_point := rotate_vector(body.orientation, local_point)
     
@@ -73,8 +98,22 @@ transform_point :: proc(body: ^RigidBody, local_point: Vector3) -> Vector3 {
     return world_point
 }
 
+// Helper function to transform a world point to local space
+world_to_local :: proc(body: ^RigidBody, world_point: rl.Vector3) -> rl.Vector3 {
+    // Translate to origin-relative coordinates
+    origin_relative := world_point - body.position
+    
+    // Create inverse quaternion
+    inv_orientation := quaternion_conjugate(body.orientation)
+    
+    // Rotate using inverse orientation
+    local_point := rotate_vector(inv_orientation, origin_relative)
+    
+    return local_point
+}
+
 // Helper function to calculate relative velocity at contact point
-calculate_relative_velocity :: proc(contact: ^Contact) -> Vector3 {
+calculate_relative_velocity :: proc(contact: ^Contact) -> rl.Vector3 {
     r1 := transform_point(contact.body_a, contact.local_point_a) - contact.body_a.position
     r2 := transform_point(contact.body_b, contact.local_point_b) - contact.body_b.position
     
@@ -85,7 +124,7 @@ calculate_relative_velocity :: proc(contact: ^Contact) -> Vector3 {
 }
 
 // Calculate cross product of two Vector3s
-cross :: proc(a, b: Vector3) -> Vector3 {
+cross :: proc(a, b: rl.Vector3) -> rl.Vector3 {
     return {
         a[1] * b[2] - a[2] * b[1],
         a[2] * b[0] - a[0] * b[2],
@@ -94,11 +133,11 @@ cross :: proc(a, b: Vector3) -> Vector3 {
 }
 
 // Transform a vector using the rotation represented by a quaternion
-rotate_vector :: proc(q: Quaternion, v: Vector3) -> Vector3 {
+rotate_vector :: proc(q: Quaternion, v: rl.Vector3) -> rl.Vector3 {
     // Proper quaternion rotation: q * v * q^-1
     // Using the formula: v' = v + 2 * cross(q.xyz, cross(q.xyz, v) + q.w * v)
-    qv := Vector3{q[0], q[1], q[2]}
-    t := cross(qv, cross(qv, v) + v * q[3]) * 2.0
+    qv := rl.Vector3{q.x, q.y, q.z}
+    t := cross(qv, cross(qv, v) + v * q.w) * 2.0
     return v + t
 }
 
@@ -189,8 +228,7 @@ solve_contact :: proc(contact: ^Contact, dt: f32) {
             angular_correction[0] * 0.5,
             angular_correction[1] * 0.5,
             angular_correction[2] * 0.5,
-            0,
-        }
+            0}
         
         // Apply to orientation
         body_a.orientation = quaternion_multiply(delta_q, body_a.orientation)
@@ -314,21 +352,21 @@ solve_contact :: proc(contact: ^Contact, dt: f32) {
 // Normalize a quaternion
 normalize_quaternion :: proc(q: Quaternion) -> Quaternion {
     length := math.sqrt(
-        q[0] * q[0] +
-        q[1] * q[1] +
-        q[2] * q[2] +
-        q[3] * q[3])
+        q.x * q.x +
+        q.y * q.y +
+        q.z * q.z +
+        q.w * q.w)
     
     // Add safety check to prevent division by zero
     if length < 1e-10 {
-        return {0, 0, 0, 1} // Return identity quaternion if length is too small
+        return Quaternion{0, 0, 0, 1} // Return identity quaternion if length is too small
     }
     
     return {
-        q[0] / length,
-        q[1] / length,
-        q[2] / length,
-        q[3] / length,
+        q.x / length,
+        q.y / length,
+        q.z / length,
+        q.w / length,
     }
 }
 
@@ -405,7 +443,7 @@ apply_dynamic_friction :: proc(contact: ^Contact, dt: f32) {
 }
 
 // Apply angular impulse to a rigid body
-apply_angular_impulse :: proc(body: ^RigidBody, angular_impulse: Vector3) -> Quaternion {
+apply_angular_impulse :: proc(body: ^RigidBody, angular_impulse: rl.Vector3) -> Quaternion {
     // Convert angular impulse to a quaternion change
     // For small rotations: dq = [0.5 * dt * ω, 0] * q
     delta_rotation := Quaternion{
@@ -433,7 +471,7 @@ quaternion_multiply :: proc(a, b: Quaternion) -> Quaternion {
 }
 
 // Integrate quaternion with angular velocity
-integrate_quaternion :: proc(q: Quaternion, angular_velocity: Vector3, dt: f32) -> Quaternion {
+integrate_quaternion :: proc(q: Quaternion, angular_velocity: rl.Vector3, dt: f32) -> Quaternion {
     // Create a quaternion from angular velocity
     // For small time steps: dq = [0.5 * dt * ω, 0] * q
     omega_quat := Quaternion{
@@ -552,132 +590,15 @@ apply_restitution :: proc(contact: ^Contact, dt: f32) {
     }
 }
 
-// Main XPBD solver function
-solve_xpbd :: proc(bodies: []RigidBody, contacts: []Contact, dt: f32, gravity: Vector3 = {0, -9.81, 0}) {
-    fmt.println("Bodies:", len(bodies))
-    fmt.println("Contacts:", len(contacts))
-
-    /*
-    How this should work:
-    dts = deltaTime / n-substeps
-    while simulating:
-        for n substeps
-            for all particles i
-                i.vel = i.vel + dts*gravity
-                i.prev_pos= i.pos
-                i.pos = i.pos + dts*i.vel
-            for all constraints C
-                solve(C, dts)
-            for all particles i
-                i.vel = (i.pos - i.prev_pos) / dts
-    
-    */
-
-
-
-    // Store previous state for all bodies
-    for i := 0; i < len(bodies); i += 1 {
-        bodies[i].position_prev = bodies[i].position
-        bodies[i].orientation_prev = bodies[i].orientation
-    }
-    
-    // Apply external forces (like gravity) and integrate velocities
-    for i := 0; i < len(bodies); i += 1 {
-        if bodies[i].inverse_mass > 0 {
-            // Apply gravity
-            bodies[i].linear_velocity += gravity * dt
-            
-            // Integrate positions
-            bodies[i].position += bodies[i].linear_velocity * dt
-            
-            // Integrate orientations using proper quaternion integration
-            bodies[i].orientation = integrate_quaternion(bodies[i].orientation, bodies[i].angular_velocity, dt)
-        }
-    }
-    
-    // Solve all contact constraints
-    for i := 0; i < len(contacts); i += 1 {
-        solve_contact(&contacts[i], dt)
-    }
-    
-    // Update velocities from positions with a damping factor to prevent freezing
-    VELOCITY_DAMPING :: 0.98  // Slight damping to prevent excessive oscillation
-    for i := 0; i < len(bodies); i += 1 {
-        if bodies[i].inverse_mass > 0 {
-            // Linear velocity update with damping to prevent freezing
-            new_velocity := (bodies[i].position - bodies[i].position_prev) / dt
-            
-            // Blend between previous velocity and new velocity to prevent sudden stops
-            bodies[i].linear_velocity = linalg.lerp(
-                bodies[i].linear_velocity,
-                new_velocity,
-                0.8,  // Blend factor - higher values follow position changes more closely
-            ) * VELOCITY_DAMPING
-            
-            // Angular velocity update from quaternion difference
-            // Extract angular velocity from quaternion difference
-            q_diff := quaternion_multiply(bodies[i].orientation, quaternion_conjugate(bodies[i].orientation_prev))
-            
-            // For small rotations, angular velocity can be approximated as:
-            // ω = 2 * q_diff.xyz / dt (when q_diff.w is close to 1)
-            new_angular_velocity := Vector3{
-                q_diff[0] * 2.0 / dt,
-                q_diff[1] * 2.0 / dt,
-                q_diff[2] * 2.0 / dt,
-            }
-            
-            // Blend angular velocities
-            bodies[i].angular_velocity = linalg.lerp(
-                bodies[i].angular_velocity,
-                new_angular_velocity,
-                0.8,
-            ) * VELOCITY_DAMPING
-            
-            // Add safety check for NaN values
-            if math.is_nan(bodies[i].position.x) || math.is_nan(bodies[i].position.y) || math.is_nan(bodies[i].position.z) {
-                bodies[i].position = bodies[i].position_prev
-                bodies[i].linear_velocity = {0, 0, 0}
-            }
-            
-            if math.is_nan(bodies[i].angular_velocity.x) || math.is_nan(bodies[i].angular_velocity.y) || math.is_nan(bodies[i].angular_velocity.z) {
-                bodies[i].angular_velocity = {0, 0, 0}
-                bodies[i].orientation = bodies[i].orientation_prev
-            }
-            
-            // Ensure objects don't sink below the ground
-            if bodies[i].position.y < 0.01 && bodies[i].linear_velocity.y < 0 {
-                bodies[i].position.y = 0.01
-                
-                // Apply a small upward velocity to prevent sticking
-                if abs(bodies[i].linear_velocity.y) < 0.1 {
-                    bodies[i].linear_velocity.y = 0.1
-                }
-            }
-        }
-    }
-    
-    // Apply velocity-level constraints
-    
-    // Apply restitution with improved parameters
-    for i := 0; i < len(contacts); i += 1 {
-        apply_restitution(&contacts[i], dt)
-    }
-    
-    // Apply dynamic friction
-    for i := 0; i < len(contacts); i += 1 {
-        apply_dynamic_friction(&contacts[i], dt)
-    }
-}
-
 // Physics world to manage all bodies and contacts
 PhysicsWorld :: struct {
     bodies: [dynamic]RigidBody,
     contacts: [dynamic]Contact,
+    distance_constraints: [dynamic]DistanceConstraint,
     
     // Solver configuration
     num_substeps: int,           // Number of substeps per update
-    iterations_per_substep: int, // Number of constraint iterations per substep
-    gravity: Vector3,            // Gravity vector
+    gravity: rl.Vector3,            // Gravity vector
 }
 
 // Create a new physics world
@@ -685,31 +606,32 @@ create_physics_world :: proc() -> ^PhysicsWorld {
     world := new(PhysicsWorld)
     world.bodies = make([dynamic]RigidBody)
     world.contacts = make([dynamic]Contact)
+    world.distance_constraints = make([dynamic]DistanceConstraint)
     
     // Default configuration
     world.num_substeps = 10
-    world.iterations_per_substep = 1
     world.gravity = {0, -9.81, 0}
     
     return world
 }
 
 // Configure the physics world
-configure_physics_world :: proc(world: ^PhysicsWorld, num_substeps: int, iterations_per_substep: int, gravity: Vector3) {
+configure_physics_world :: proc(world: ^PhysicsWorld, num_substeps: int, gravity: rl.Vector3) {
     world.num_substeps = num_substeps
-    world.iterations_per_substep = iterations_per_substep
     world.gravity = gravity
 }
 
 // Destroy a physics world and free its resources
 destroy_physics_world :: proc(world: ^PhysicsWorld) {
+    fmt.println("Destroying physics world")
     delete(world.bodies)
     delete(world.contacts)
+    delete(world.distance_constraints)
     free(world)
 }
 
 // Create a box rigid body with compliance parameter
-create_box :: proc(world: ^PhysicsWorld, position: Vector3, size: Vector3, mass: f32, compliance: f32 = 0.01) -> int {
+create_box :: proc(world: ^PhysicsWorld, position: rl.Vector3, size: rl.Vector3, mass: f32, compliance: f32 = 0.01) -> int {
     body := RigidBody{
         position = position,
         position_prev = position,
@@ -722,6 +644,7 @@ create_box :: proc(world: ^PhysicsWorld, position: Vector3, size: Vector3, mass:
         static_friction = 0.5,
         dynamic_friction = 0.3,
         compliance = compliance,  // Use provided compliance value
+        damping = 0.5,
         shape_type = .Box,
         shape_size = size * 0.5,  // Convert to half-extents
     }
@@ -761,7 +684,7 @@ create_box :: proc(world: ^PhysicsWorld, position: Vector3, size: Vector3, mass:
 }
 
 // Create a sphere rigid body with compliance parameter
-create_sphere :: proc(world: ^PhysicsWorld, position: Vector3, radius: f32, mass: f32, compliance: f32 = 0.005) -> int {
+create_sphere :: proc(world: ^PhysicsWorld, position: rl.Vector3, radius: f32, mass: f32, compliance: f32 = 0.005) -> int {
     body := RigidBody{
         position = position,
         position_prev = position,
@@ -774,6 +697,7 @@ create_sphere :: proc(world: ^PhysicsWorld, position: Vector3, radius: f32, mass
         static_friction = 0.3,
         dynamic_friction = 0.2,
         compliance = compliance,  // Use provided compliance value
+        damping = 0.5,
         shape_type = .Sphere,
         shape_size = {radius, 0, 0},  // Store radius in x component
     }
@@ -810,18 +734,22 @@ create_sphere :: proc(world: ^PhysicsWorld, position: Vector3, radius: f32, mass
 }
 
 // Set velocity for a rigid body
-set_velocity :: proc(world: ^PhysicsWorld, body_index: int, linear_velocity: Vector3, angular_velocity: Vector3) {
+set_velocity :: proc(world: ^PhysicsWorld, body_index: int, linear_velocity: rl.Vector3, angular_velocity: rl.Vector3) {
     if body_index >= 0 && body_index < len(world.bodies) {
         world.bodies[body_index].linear_velocity = linear_velocity
         world.bodies[body_index].angular_velocity = angular_velocity
+    } else {
+        fmt.println("set_velocity: body_index:", body_index, "linear_velocity:", linear_velocity, "angular_velocity:", angular_velocity)
+        fmt.println("set_velocity: body_index out of bounds")
     }
 }
 
 // Get position of a rigid body
-get_position :: proc(world: ^PhysicsWorld, body_index: int) -> Vector3 {
+get_position :: proc(world: ^PhysicsWorld, body_index: int) -> rl.Vector3 {
     if body_index >= 0 && body_index < len(world.bodies) {
         return world.bodies[body_index].position
     }
+    fmt.println("get_position: body_index out of bounds")
     return {0, 0, 0}
 }
 
@@ -830,14 +758,16 @@ get_orientation :: proc(world: ^PhysicsWorld, body_index: int) -> Quaternion {
     if body_index >= 0 && body_index < len(world.bodies) {
         return world.bodies[body_index].orientation
     }
+    fmt.println("get_orientation: body_index out of bounds")
     return {0, 0, 0, 1}
 }
 
 // Get velocity of a rigid body
-get_velocity :: proc(world: ^PhysicsWorld, body_index: int) -> Vector3 {
+get_velocity :: proc(world: ^PhysicsWorld, body_index: int) -> rl.Vector3 {
     if body_index >= 0 && body_index < len(world.bodies) {
         return world.bodies[body_index].linear_velocity
     }
+    fmt.println("get_velocity: body_index out of bounds")
     return {0, 0, 0}
 }
 
@@ -852,7 +782,7 @@ detect_sphere_sphere :: proc(a, b: ^RigidBody) -> (bool, Contact) {
         distance := math.sqrt(distance_squared)
         
         // Avoid division by zero with a more robust check
-        normal := Vector3{0, 1, 0}
+        normal := rl.Vector3{0, 1, 0}
         if distance > 0.0001 {
             normal = delta / distance
         }
@@ -883,7 +813,7 @@ detect_sphere_sphere :: proc(a, b: ^RigidBody) -> (bool, Contact) {
 
 detect_box_sphere :: proc(box, sphere: ^RigidBody) -> (bool, Contact) {
     // Find closest point on box to sphere center
-    closest := Vector3{
+    closest := rl.Vector3{
         clamp(sphere.position.x, box.position.x - box.shape_size.x, box.position.x + box.shape_size.x),
         clamp(sphere.position.y, box.position.y - box.shape_size.y, box.position.y + box.shape_size.y),
         clamp(sphere.position.z, box.position.z - box.shape_size.z, box.position.z + box.shape_size.z),
@@ -897,7 +827,7 @@ detect_box_sphere :: proc(box, sphere: ^RigidBody) -> (bool, Contact) {
         dist := math.sqrt(dist_squared)
         
         // Avoid division by zero
-        normal := Vector3{0, 1, 0}
+        normal := rl.Vector3{0, 1, 0}
         if dist > 0.0001 {
             normal = delta / dist
         }
@@ -939,7 +869,7 @@ detect_box_box :: proc(a, b: ^RigidBody) -> (bool, Contact) {
     }
     
     // Find smallest overlap to determine collision normal
-    normal := Vector3{0, 1, 0}
+    normal := rl.Vector3{0, 1, 0}
     penetration := overlap_y
     
     if overlap_x < overlap_y && overlap_x < overlap_z {
@@ -967,16 +897,16 @@ detect_box_box :: proc(a, b: ^RigidBody) -> (bool, Contact) {
     max_b := b.position + b.shape_size
     
     // Calculate overlap box
-    overlap_min := Vector3{
-        max(min_a.x, min_b.x),
-        max(min_a.y, min_b.y),
-        max(min_a.z, min_b.z),
+    overlap_min := rl.Vector3{
+        math.max(min_a.x, min_b.x),
+        math.max(min_a.y, min_b.y),
+        math.max(min_a.z, min_b.z),
     }
     
-    overlap_max := Vector3{
-        min(max_a.x, max_b.x),
-        min(max_a.y, max_b.y),
-        min(max_a.z, max_b.z),
+    overlap_max := rl.Vector3{
+        math.min(max_a.x, max_b.x),
+        math.min(max_a.y, max_b.y),
+        math.min(max_a.z, max_b.z),
     }
     
     // Contact point at center of overlap region
@@ -1037,21 +967,124 @@ detect_contacts :: proc(world: ^PhysicsWorld) {
             }
         }
     }
-
 }
 
 // Update the physics world by one time step
 update_physics :: proc(world: ^PhysicsWorld, dt: f32) {
+    //fmt.println("update_physics: dt:", dt)
     // Use the configured number of substeps and iterations
     substep_dt := dt / f32(world.num_substeps)
     
     // Run the simulation for each substep
     for substep := 0; substep < world.num_substeps; substep += 1 {
+        //fmt.println("update_physics: substep:", substep)
+        // Store previous state for all bodies
+        for i := 0; i < len(world.bodies); i += 1 {
+            world.bodies[i].position_prev = world.bodies[i].position
+            world.bodies[i].orientation_prev = world.bodies[i].orientation
+        }
+        
+        // Apply external forces (like gravity) and integrate velocities
+        for i := 0; i < len(world.bodies); i += 1 {
+            if world.bodies[i].inverse_mass > 0 {
+                // Apply gravity
+                world.bodies[i].linear_velocity += world.gravity * substep_dt
+                
+                // Integrate positions
+                world.bodies[i].position += world.bodies[i].linear_velocity * substep_dt
+                
+                // Integrate orientations using proper quaternion integration
+                world.bodies[i].orientation = integrate_quaternion(
+                    world.bodies[i].orientation, 
+                    world.bodies[i].angular_velocity, 
+                    substep_dt)
+            }
+        }
+        
         // Detect collisions and generate contacts
         detect_contacts(world)
         
-        // Solve the system using XPBD with configured iterations
-        solve_xpbd(world.bodies[:], world.contacts[:], substep_dt, world.gravity)
+        // Solve distance constraints
+        for i := 0; i < len(world.distance_constraints); i += 1 {
+            solve_distance_constraint(&world.distance_constraints[i], substep_dt)
+        }
+        
+        // Solve contact constraints
+        for i := 0; i < len(world.contacts); i += 1 {
+            solve_contact(&world.contacts[i], substep_dt)
+        }
+        
+        // Update velocities from positions
+        VELOCITY_DAMPING :: 0.98  // Slight damping to prevent excessive oscillation
+        for i := 0; i < len(world.bodies); i += 1 {
+            if world.bodies[i].inverse_mass > 0 {
+                // Linear velocity update with damping
+                new_velocity := (world.bodies[i].position - world.bodies[i].position_prev) / substep_dt
+                
+                // Blend between previous velocity and new velocity to prevent sudden stops
+                world.bodies[i].linear_velocity = linalg.lerp(
+                    world.bodies[i].linear_velocity,
+                    new_velocity,
+                    0.8,  // Blend factor - higher values follow position changes more closely
+                ) * math.max(1.0 - world.bodies[i].damping * substep_dt, 0.0)
+                
+                // Angular velocity update from quaternion difference
+                q_diff := quaternion_multiply(
+                    world.bodies[i].orientation, 
+                    quaternion_conjugate(world.bodies[i].orientation_prev))
+                
+                // For small rotations, angular velocity can be approximated as:
+                // ω = 2 * q_diff.xyz / dt (when q_diff.w is close to 1)
+                new_angular_velocity := rl.Vector3{
+                    q_diff[0] * 2.0 / substep_dt,
+                    q_diff[1] * 2.0 / substep_dt,
+                    q_diff[2] * 2.0 / substep_dt,
+                }
+                
+                // Blend angular velocities with damping
+                world.bodies[i].angular_velocity = linalg.lerp(
+                    world.bodies[i].angular_velocity,
+                    new_angular_velocity,
+                    0.8) * math.max(1.0 - world.bodies[i].damping * substep_dt, 0.0)
+                
+                // Apply velocity-level constraints
+                
+                // Apply restitution
+                for j := 0; j < len(world.contacts); j += 1 {
+                    apply_restitution(&world.contacts[j], substep_dt)
+                }
+                
+                // Apply dynamic friction
+                for j := 0; j < len(world.contacts); j += 1 {
+                    apply_dynamic_friction(&world.contacts[j], substep_dt)
+                }
+                
+                // Add safety check for NaN values
+                if math.is_nan(world.bodies[i].position.x) || 
+                   math.is_nan(world.bodies[i].position.y) || 
+                   math.is_nan(world.bodies[i].position.z) {
+                    world.bodies[i].position = world.bodies[i].position_prev
+                    world.bodies[i].linear_velocity = {0, 0, 0}
+                }
+                
+                if math.is_nan(world.bodies[i].angular_velocity.x) || 
+                   math.is_nan(world.bodies[i].angular_velocity.y) || 
+                   math.is_nan(world.bodies[i].angular_velocity.z) {
+                    world.bodies[i].angular_velocity = {0, 0, 0}
+                    world.bodies[i].orientation = world.bodies[i].orientation_prev
+                }
+                
+                // Ensure objects don't sink below the ground
+                if world.bodies[i].position.y < 0.01 && world.bodies[i].linear_velocity.y < 0 {
+                    world.bodies[i].position.y = 0.01
+                    
+                    // Apply a small upward velocity to prevent sticking
+                    if abs(world.bodies[i].linear_velocity.y) < 0.1 {
+                        world.bodies[i].linear_velocity.y = 0.1
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1075,4 +1108,277 @@ set_compliance :: proc(world: ^PhysicsWorld, body_index: int, compliance: f32) {
     if body_index >= 0 && body_index < len(world.bodies) {
         world.bodies[body_index].compliance = compliance
     }
+}
+
+// Create a new distance constraint
+create_distance_constraint :: proc(world: ^PhysicsWorld, body_a_index, body_b_index: int, 
+                                  point_a, point_b: rl.Vector3, distance: f32, 
+                                  compliance: f32 = 0.0, unilateral: bool = false) -> int {
+    if body_a_index < 0 || body_a_index >= len(world.bodies) || 
+       body_b_index < 0 || body_b_index >= len(world.bodies) {
+        return -1
+    }
+    
+    body_a := &world.bodies[body_a_index]
+    body_b := &world.bodies[body_b_index]
+    
+    // Convert world points to local coordinates using proper quaternion rotation
+    local_a := world_to_local(body_a, point_a)
+    local_b := world_to_local(body_b, point_b)
+    
+    constraint := DistanceConstraint{
+        body_a = body_a,
+        body_b = body_b,
+        local_point_a = local_a,
+        local_point_b = local_b,
+        distance = distance,
+        compliance = compliance,
+        unilateral = unilateral,
+        lambda = 0,
+    }
+    
+    append(&world.distance_constraints, constraint)
+    return len(world.distance_constraints) - 1
+}
+
+// Solve a distance constraint
+solve_distance_constraint :: proc(constraint: ^DistanceConstraint, dt: f32) {
+    // Get current world space attachment points
+    world_point_a := transform_point(constraint.body_a, constraint.local_point_a)
+    world_point_b := transform_point(constraint.body_b, constraint.local_point_b)
+    
+    // Calculate current distance vector
+    delta := world_point_b - world_point_a
+    current_distance := linalg.length(delta)
+    
+    // Skip if zero distance to avoid division by zero
+    if current_distance < 1e-6 {
+        return
+    }
+    
+    // Normalize direction
+    direction := delta / current_distance
+    
+    // For unilateral constraints, only enforce if stretched beyond target
+    if constraint.unilateral && current_distance <= constraint.distance {
+        return
+    }
+    
+    // Calculate constraint violation
+    c := current_distance - constraint.distance
+    
+    // Calculate inverse mass contributions
+    w_a := calculate_inverse_mass(constraint.body_a, direction, world_point_a)
+    w_b := calculate_inverse_mass(constraint.body_b, direction, world_point_b)
+    
+    // Combined inverse mass
+    w := w_a + w_b
+    
+    // Skip if infinite mass
+    if w <= 0 {
+        return
+    }
+    
+    // XPBD constraint update
+    alpha := constraint.compliance / (dt * dt)
+    delta_lambda := (-c - alpha * constraint.lambda) / (w + alpha)
+    constraint.lambda += delta_lambda
+    
+    // Calculate impulse
+    impulse := direction * delta_lambda
+    
+    // Apply impulse to bodies
+    apply_impulse(constraint.body_a, impulse, world_point_a)
+    apply_impulse(constraint.body_b, -impulse, world_point_b)
+}
+
+// Calculate inverse mass contribution for a point and direction
+calculate_inverse_mass :: proc(body: ^RigidBody, direction: rl.Vector3, world_point: rl.Vector3) -> f32 {
+    if body.inverse_mass == 0 {
+        return 0
+    }
+    
+    // Calculate moment arm
+    r := world_point - body.position
+    
+    // Calculate angular contribution
+    r_cross_n := cross(r, direction)
+    angular_term := linalg.dot(r_cross_n, linalg.matrix_mul_vector(body.inverse_inertia_tensor, r_cross_n))
+    
+    // Total inverse mass including both linear and angular terms
+    return body.inverse_mass + angular_term
+}
+
+// Apply an impulse to a rigid body at a specific point
+apply_impulse :: proc(body: ^RigidBody, impulse: rl.Vector3, world_point: rl.Vector3) {
+    if body.inverse_mass == 0 {
+        return
+    }
+    
+    // Apply linear impulse
+    body.position += impulse * body.inverse_mass
+    
+    // Calculate angular impulse
+    r := world_point - body.position
+    angular_impulse := cross(r, impulse)
+    angular_correction := linalg.matrix_mul_vector(body.inverse_inertia_tensor, angular_impulse)
+    
+    // Create quaternion from angular correction
+    delta_q := Quaternion{
+        angular_correction[0] * 0.5,
+        angular_correction[1] * 0.5,
+        angular_correction[2] * 0.5,
+        0,
+    }
+    
+    // Apply to orientation
+    body.orientation = quaternion_multiply(delta_q, body.orientation)
+    body.orientation = normalize_quaternion(body.orientation)
+}
+
+// Create a static ground plane
+create_ground_plane :: proc(world: ^PhysicsWorld, y_position: f32 = 0.0, size: f32 = 50.0) -> int {
+    // Create a large, flat box with infinite mass (static)
+    ground_size := rl.Vector3{size, 0.1, size}
+    ground_pos := rl.Vector3{0, y_position - 0.05, 0}  // Position slightly below the y_position to ensure contact
+    
+    ground_index := create_box(world, ground_pos, ground_size, 0)  // Mass of 0 means static/infinite mass
+    
+    // Set material properties for the ground
+    set_material_properties(world, ground_index, 0.3, 0.8, 0.7, 0.0)
+    
+    return ground_index
+}
+
+// Create a chain of rigid bodies connected by distance constraints
+create_chain :: proc(world: ^PhysicsWorld, start_pos: rl.Vector3, num_links: int, link_size: rl.Vector3, 
+                    link_mass: f32, link_distance: f32, compliance: f32 = 0.001, unilateral: bool = false) -> []int {
+    if num_links <= 0 {
+        return nil
+    }
+    
+    // Allocate array to store body indices
+    body_indices := make([]int, num_links)
+    
+    // Create the first body
+    current_pos := start_pos
+    prev_body_index := create_box(world, current_pos, link_size, link_mass)
+    body_indices[0] = prev_body_index
+    
+    // Set damping to prevent excessive oscillation
+    world.bodies[prev_body_index].damping = 5.0
+    
+    // Create the rest of the chain
+    for i := 1; i < num_links; i += 1 {
+        // Position for the next link
+        current_pos.y -= link_distance + link_size.y
+        
+        // Create the next body
+        body_index := create_box(world, current_pos, link_size, link_mass)
+        body_indices[i] = body_index
+        
+        // Set damping
+        world.bodies[body_index].damping = 5.0
+        
+        // Create attachment points
+        p1 := rl.Vector3{0, current_pos.y + 0.5 * link_size.y, 0}
+        p2 := rl.Vector3{0, current_pos.y - link_distance + 0.5 * link_size.y, 0}
+        
+        // Create distance constraint between this body and the previous one
+        create_distance_constraint(world, body_index, prev_body_index, p1, p2, 
+                                  link_distance, compliance, unilateral)
+        
+        // Update previous body index for next iteration
+        prev_body_index = body_index
+    }
+    
+    return body_indices
+}
+
+// Create a mobile-like structure with bars and spheres
+create_mobile :: proc(world: ^PhysicsWorld, start_pos: rl.Vector3, num_levels: int, 
+                     bar_size: rl.Vector3, density: f32 = 1000.0, 
+                     compliance: f32 = 0.0, unilateral: bool = true) -> []int {
+    if num_levels <= 0 {
+        return nil
+    }
+    
+    // Allocate array to store body indices
+    body_indices := make([]int, num_levels * 2)  // Each level has a bar and a sphere
+    
+    // Calculate base radius for the spheres
+    base_radius :f32= 0.08
+    
+    // Calculate the distance between attachment points
+    distance :f32= 0.5 * bar_size.x - 0.04  // Half bar length minus thickness
+    height :f32= 0.3  // Height between levels
+    
+    // Start position
+    bar_pos := start_pos
+    prev_bar_index := -1
+    
+    // Create the mobile structure
+    for i := 0; i < num_levels; i += 1 {
+        // Create the bar
+        bar_index := create_box(world, bar_pos, bar_size, density)
+        body_indices[i*2] = bar_index
+        
+        // Set damping
+        world.bodies[bar_index].damping = 0.5
+        
+        // If not the first level, connect to the previous bar
+        if prev_bar_index >= 0 {
+            // Create attachment points
+            p0 := rl.Vector3{bar_pos.x, bar_pos.y + 0.5 * bar_size.y, bar_pos.z}
+            p1 := rl.Vector3{bar_pos.x, bar_pos.y + height - 0.5 * bar_size.y, bar_pos.z}
+            
+            // Create distance constraint
+            create_distance_constraint(world, bar_index, prev_bar_index, p0, p1, 
+                                      height - bar_size.y, compliance, unilateral)
+        }
+        
+        // Calculate sphere radius for this level
+        // For simplicity, we'll use a formula that increases the radius for lower levels
+        sphere_radius := base_radius * (1.0 + 0.5 * f32(num_levels - i - 1))
+        
+        // Create the sphere
+        sphere_pos := rl.Vector3{bar_pos.x + distance, bar_pos.y - height, bar_pos.z}
+        sphere_index := create_sphere(world, sphere_pos, sphere_radius, density)
+        body_indices[i*2 + 1] = sphere_index
+        
+        // Set damping
+        world.bodies[sphere_index].damping = 0.5
+        
+        // Create attachment points for the sphere
+        p0 := rl.Vector3{sphere_pos.x, sphere_pos.y + 0.5 * sphere_radius, sphere_pos.z}
+        p1 := rl.Vector3{sphere_pos.x, sphere_pos.y + height - 0.5 * bar_size.y, sphere_pos.z}
+        
+        // Create distance constraint between sphere and bar
+        create_distance_constraint(world, sphere_index, bar_index, p0, p1, 
+                                  height - bar_size.y, compliance, unilateral)
+        
+        // For the last level, add a second sphere on the other side for balance
+        if i == num_levels - 1 {
+            sphere_pos.x -= 2.0 * distance
+            second_sphere_index := create_sphere(world, sphere_pos, sphere_radius, density)
+            
+            // Set damping
+            world.bodies[second_sphere_index].damping = 0.5
+            
+            // Create attachment points
+            p0.x -= 2.0 * distance
+            p1.x -= 2.0 * distance
+            
+            // Create distance constraint
+            create_distance_constraint(world, second_sphere_index, bar_index, p0, p1, 
+                                      height - bar_size.y, compliance, unilateral)
+        }
+        
+        // Update for next level
+        prev_bar_index = bar_index
+        bar_pos.y -= height
+        bar_pos.x -= distance
+    }
+    
+    return body_indices
 }

@@ -57,6 +57,9 @@ Game_Memory :: struct {
 	physics_world: ^PhysicsWorld,
 	physics_bodies: [dynamic]int,  // Indices into the physics world
 	player_physics_body_index: int, // Index of the player's physics body
+
+	//simple pbd
+	pbd_world: ^PBD_World,
 }
 
 g_mem: ^Game_Memory
@@ -98,17 +101,18 @@ game_init :: proc() {
 		}
 	}
 
+
 	// Initialize physics world
 	physics_world := create_physics_world()
 	
 	// Configure physics world for better stability
 	// Increase iterations for more accurate simulation
-	configure_physics_world(physics_world, 4, 10, {0, -9.81, 0})
+	configure_physics_world(physics_world, 20, {0, -9.81, 0})
 	
 	physics_bodies := make([dynamic]int)
 	
 	// Create player physics body (a sphere)
-	player_start_pos := Vector3{0, 5, 0}  // Start a bit higher to see if gravity works
+	player_start_pos := rl.Vector3{0, 5, 0}  // Start a bit higher to see if gravity works
 	player_radius := f32(1.0)
 	player_mass := f32(1.0)  // Even lighter for more responsive movement
 	player_compliance := f32(0.00001)  // Much stiffer for better control
@@ -127,7 +131,7 @@ game_init :: proc() {
 	
 	// Create some dynamic boxes with different compliance values
 	for i in 0..<5 {
-		pos := Vector3{f32(rl.GetRandomValue(-20, 20)), f32(50 + i * 2), f32(rl.GetRandomValue(-20, 20))}
+		pos := rl.Vector3{f32(rl.GetRandomValue(-20, 20)), f32(50 + i * 2), f32(rl.GetRandomValue(-20, 20))}
 		// Use slightly different compliance values for variety
 		compliance := 0.01 + f32(i) * 0.001
 		box_index := create_box(physics_world, pos, {1, 1, 1}, 1, compliance)
@@ -136,12 +140,14 @@ game_init :: proc() {
 	
 	// Create some dynamic spheres with different compliance values
 	for i in 0..<20 {
-		pos := Vector3{f32(rl.GetRandomValue(-20, 20)), f32(15 + i * 2), f32(rl.GetRandomValue(-20, 20))}
+		pos := rl.Vector3{f32(rl.GetRandomValue(-20, 20)), f32(15 + i * 2), f32(rl.GetRandomValue(-20, 20))}
 		// Use slightly different compliance values for variety
 		compliance := 0.005 + f32(i) * 0.0005
 		sphere_index := create_sphere(physics_world, pos, 1, 1, compliance)
 		append(&physics_bodies, sphere_index)
 	}
+
+	pbd_world := pbd_init()
 
 	g_mem^ = Game_Memory {
 		run = true,
@@ -158,7 +164,10 @@ game_init :: proc() {
 		physics_world = physics_world,
 		physics_bodies = physics_bodies,
 		player_physics_body_index = player_physics_index,
+
+		pbd_world = pbd_world,
 	}
+	//pbd_init()
 
 	game_hot_reloaded(g_mem)
 }
@@ -170,11 +179,13 @@ update :: proc() {
 	// Test force application - press T key to apply a strong upward force
 	if rl.IsKeyPressed(.T) {
 		current_vel := get_velocity(g_mem.physics_world, g_mem.player_physics_body_index)
-		physics_vel := Vector3{current_vel.x, current_vel.y, current_vel.z}
+		physics_vel := rl.Vector3{current_vel.x, current_vel.y, current_vel.z}
 		physics_vel.y = 100.0  // Strong upward force
 		set_velocity(g_mem.physics_world, g_mem.player_physics_body_index, physics_vel, {0, 0, 0})
 	}
-	
+
+	pbd_simulate(rl.GetFrameTime())
+
 	// Update physics
 	update_physics(g_mem.physics_world, rl.GetFrameTime())
 	
@@ -279,6 +290,10 @@ draw :: proc() {
 	// Draw the look target as a small yellow sphere
 	rl.DrawLine3D(g_mem.player_pos, g_mem.player_look_target, rl.YELLOW)
 	rl.DrawSphere(g_mem.player_look_target, 0.3, rl.YELLOW)
+
+	// simple pbd
+	pbd_draw_points(g_mem.pbd_world.points)
+	pbd_draw_springs(g_mem.pbd_world.springs)
 
 	//debug
 	rl.DrawSphere(g_mem.debug.nearest_point, 0.3, rl.RED)
@@ -469,14 +484,14 @@ controller_input :: proc() {
 
 		// Get current velocity from physics system
 		current_vel := get_velocity(g_mem.physics_world, g_mem.player_physics_body_index)
-		physics_vel := Vector3{current_vel.x, current_vel.y, current_vel.z}
+		physics_vel := rl.Vector3{current_vel.x, current_vel.y, current_vel.z}
 		
 		//fmt.println("Current physics velocity before:", physics_vel)
 		
 		// Apply movement forces to physics body
 		if linalg.length(input) > 0 {
 			// Convert input to physics Vector3
-			move_force := Vector3{input.x, input.y, input.z}
+			move_force := rl.Vector3{input.x, input.y, input.z}
 			
 			// Scale force for better control
 			MOVE_FORCE_SCALE :: f32(100.0)  // Increased for more responsive movement
@@ -508,17 +523,11 @@ controller_input :: proc() {
 		
 		// Jump physics
 		if rl.IsGamepadButtonPressed(0, .RIGHT_FACE_DOWN) {
-			//fmt.println("Jump button pressed")
-			// Only allow jumping if player is close to the ground
-			if g_mem.player_pos.y < 1.5 {
-				// Apply upward impulse
-				JUMP_FORCE :: f32(80.0)  // Increased jump force
-				physics_vel.y = JUMP_FORCE
-				//fmt.println("Applying jump force:", JUMP_FORCE, "New velocity:", physics_vel)
-				set_velocity(g_mem.physics_world, g_mem.player_physics_body_index, physics_vel, {0, 0, 0})
-			} else {
-				fmt.println("Not jumping - too high:", g_mem.player_pos.y)
-			}
+			// Apply upward impulse
+			JUMP_FORCE :: f32(5.0)  // Increased jump force
+			physics_vel.y = JUMP_FORCE
+			//fmt.println("Applying jump force:", JUMP_FORCE, "New velocity:", physics_vel)
+			set_velocity(g_mem.physics_world, g_mem.player_physics_body_index, physics_vel, {0, 0, 0})
 		}
 	}
 	
@@ -606,6 +615,12 @@ game_shutdown :: proc() {
 		destroy_physics_world(g_mem.physics_world)
 	}
 	delete(g_mem.physics_bodies)
+	
+	if g_mem.pbd_world != nil {
+		pbd_deinit(g_mem.pbd_world)
+	}
+
+	delete(g_mem.ground_boxes)
 	
 	free(g_mem)
 }

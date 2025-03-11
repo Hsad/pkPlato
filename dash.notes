@@ -1,0 +1,15 @@
+    /*
+    How this should work:
+    dts = deltaTime / n-substeps
+    while simulating:
+        for n substeps
+            for all particles i
+                i.vel = i.vel + dts*gravity
+                i.prev_pos= i.pos
+                i.pos = i.pos + dts*i.vel
+            for iteration in iterations_per_substep
+                for all constraints C
+                    solve(C, dts)
+            for all particles i
+                i.vel = (i.pos - i.prev_pos) / dts
+    */
