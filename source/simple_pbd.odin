@@ -38,13 +38,16 @@ pbd_simulate :: proc(delta_time: f32) {
             g_mem.pbd_world.points[i].prev_pos = g_mem.pbd_world.points[i].position
             g_mem.pbd_world.points[i].position = g_mem.pbd_world.points[i].position + dts*g_mem.pbd_world.points[i].velocity
         }
+
         for i in 0..<len(g_mem.pbd_world.points) {
             solve_ground(&g_mem.pbd_world.points[i], dts)
         }
+
         for i in 0..<len(g_mem.pbd_world.springs) { //solve springs
             //fmt.println("i", i)
             solve_spring(&g_mem.pbd_world.springs[i], dts)
         }
+
         for i in 0..<len(g_mem.pbd_world.points) {
             g_mem.pbd_world.points[i].velocity = (g_mem.pbd_world.points[i].position - g_mem.pbd_world.points[i].prev_pos) / dts
         }

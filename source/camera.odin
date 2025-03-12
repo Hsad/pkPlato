@@ -10,8 +10,29 @@ Camera :: struct {
 	thrd_pos: rl.Vector3,
 }
 
-calc_camera_1st_person :: proc() {
+game_camera :: proc() -> rl.Camera3D {
+	if g_mem.camera.using_first_person {
+		return {
+			position = g_mem.camera.frst_pos,
+			target = g_mem.player.look_target,
+			up = {0, 1, 0},
+			fovy = 45,
+			projection = .PERSPECTIVE,
+		}
+	} else {
+		return {
+			position = g_mem.camera.thrd_pos,
+			target = g_mem.player.look_target,
+			up = {0, 1, 0},
+			fovy = 45,
+			projection = .PERSPECTIVE,
+		}
+	}
+}
 
+
+calc_camera_1st_person :: proc() {
+    g_mem.camera.frst_pos = g_mem.player.pos
 }
 
 calc_camera_3rd_person :: proc() {

@@ -25,6 +25,31 @@ Input_Intent :: struct {
     button_y: bool,
 }
 
+get_input_intent :: proc() {
+    if rl.IsGamepadAvailable(0) {
+        g_mem.input_intent.move_x = rl.GetGamepadAxisMovement(0, .LEFT_X)
+        g_mem.input_intent.move_z = rl.GetGamepadAxisMovement(0, .LEFT_Y)
+
+        g_mem.input_intent.look_x = rl.GetGamepadAxisMovement(0, .RIGHT_X)
+        g_mem.input_intent.look_y = rl.GetGamepadAxisMovement(0, .RIGHT_Y)
+
+        g_mem.input_intent.right_stick = rl.IsGamepadButtonDown(0, .RIGHT_THUMB)
+        g_mem.input_intent.left_stick = rl.IsGamepadButtonDown(0, .LEFT_THUMB)
+
+        g_mem.input_intent.trigger_left = rl.GetGamepadAxisMovement(0, .LEFT_TRIGGER)
+        g_mem.input_intent.trigger_right = rl.GetGamepadAxisMovement(0, .RIGHT_TRIGGER)
+
+        g_mem.input_intent.bumper_left = rl.IsGamepadButtonDown(0, .LEFT_TRIGGER_1)
+        g_mem.input_intent.bumper_right = rl.IsGamepadButtonDown(0, .RIGHT_TRIGGER_1)
+
+        g_mem.input_intent.button_a = rl.IsGamepadButtonDown(0, .RIGHT_FACE_DOWN)
+        g_mem.input_intent.button_b = rl.IsGamepadButtonDown(0, .RIGHT_FACE_RIGHT)
+        g_mem.input_intent.button_x = rl.IsGamepadButtonDown(0, .RIGHT_FACE_LEFT)
+        g_mem.input_intent.button_y = rl.IsGamepadButtonDown(0, .RIGHT_FACE_UP)
+    }
+}
+
+
 controller_input :: proc() {
 	input: rl.Vector3
 

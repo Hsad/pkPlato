@@ -55,27 +55,6 @@ Game_Memory :: struct {
 
 g_mem: ^Game_Memory
 
-game_camera :: proc() -> rl.Camera3D {
-	if g_mem.camera.using_first_person {
-		return {
-			position = g_mem.camera.frst_pos,
-			target = g_mem.player.look_target,
-			up = {0, 1, 0},
-			fovy = 45,
-			projection = .PERSPECTIVE,
-		}
-	} else {
-		return {
-			position = g_mem.camera.thrd_pos,
-			target = g_mem.player.look_target,
-			up = {0, 1, 0},
-			fovy = 45,
-			projection = .PERSPECTIVE,
-		}
-	}
-
-}
-
 ui_camera :: proc() -> rl.Camera2D {
 	return {
 		zoom = f32(rl.GetScreenHeight())/PIXEL_WINDOW_HEIGHT,
@@ -102,7 +81,7 @@ game_init :: proc() {
 	ground_grid := init_ground_grid()
 
 	camera := Camera{
-		using_first_person = false,
+		using_first_person = true,
 		frst_pos = {player_start_pos.x, player_start_pos.y, player_start_pos.z},
 		thrd_pos = {player_start_pos.x - 10, player_start_pos.y + 5, player_start_pos.z},
 	}
@@ -133,15 +112,20 @@ game_init :: proc() {
 
 update :: proc() {
 
-	controller_input() // build input state
+	//controller_input() // build input state
+	get_input_intent()
 
 	player_controller() // update player position
+	g_mem.pbd_world.points[0].velocity = g_mem.player.vel
 
 	pbd_simulate(rl.GetFrameTime()) // simulate physics
 
+	// control look target
 	hight_change := g_mem.pbd_world.points[0].position.y - g_mem.player.pos.y
-	g_mem.player.pos = g_mem.pbd_world.points[0].position
 	g_mem.player.look_target.y += hight_change
+	// update player position
+	g_mem.player.pos = g_mem.pbd_world.points[0].position
+	g_mem.player.vel = g_mem.pbd_world.points[0].velocity
 
 	calc_camera_3rd_person()
 	calc_camera_1st_person()
