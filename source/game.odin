@@ -52,6 +52,8 @@ Game_Memory :: struct {
 
 	//simple pbd
 	pbd_world: ^PBD_World,
+
+	fling: Fling,
 }
 
 g: ^Game_Memory
@@ -103,7 +105,7 @@ game_init :: proc() {
 		pbd = pbd,
 	}
 
-
+	fling := create_fling(pbd_world)
 
 	g^ = Game_Memory {
 		run = true,
@@ -119,6 +121,7 @@ game_init :: proc() {
 		camera = camera,
 
 		pbd_world = pbd_world,
+		fling = fling,
 	}
 
 
@@ -135,6 +138,7 @@ update :: proc() {
 
 	pbd_simulate(rl.GetFrameTime()) // simulate physics
 
+	simulate_fling(&g.fling)
 
 	//// control look target
 	//hight_change := g.pbd_world.points[0].position.y - g.player.pos.y
@@ -157,8 +161,8 @@ draw :: proc() {
 	rl.BeginDrawing()
 	rl.ClearBackground(rl.BLACK)
 
-	rl.BeginMode3D(game_camera())
-
+	//rl.BeginMode3D(game_camera())
+	rl.BeginMode3D(get_fling_camera())
 	rl.DrawModel(g.ground_model, {0, 0, 0}, 1, rl.WHITE)
 
 	// Draw the player as a small blue sphere
