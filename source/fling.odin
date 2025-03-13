@@ -3,72 +3,267 @@ package game
 import rl "vendor:raylib"
 import "core:fmt"
 import "core:math"
-
+import "core:math/linalg"
 Fling :: struct {
-    Center: Point,
+    Center: ^Point,
 
     rotation: rl.Vector3,
+    frst_pos: rl.Vector3,
+    thrd_pos: rl.Vector3,
+    ideal_camera_pos: rl.Vector3,
+    look_target: rl.Vector3,
 }
 
 
-get_fling_camera :: proc() -> rl.Camera {
-	return rl.Camera{
-		position = g.fling.Center.position + rl.Vector3{-3, 1, 0},
-		target = g.fling.Center.position,
-		up = rl.Vector3{0, 1, 0},
+get_fling_camera :: proc() -> rl.Camera3D {
+	if g.camera.using_first_person {
+		look_dir := linalg.normalize(g.fling.look_target - g.fling.frst_pos)
+		return {
+			position = g.fling.frst_pos - look_dir * 1,
+			target = g.fling.look_target,
+			up = {0, 1, 0},
+			fovy = 75,
+			projection = .PERSPECTIVE,
+		}
+	} else {
+		return {
+			position = g.fling.thrd_pos,
+			target = g.fling.Center.position,
+			up = {0, 1, 0},
+			fovy = 45,
+			projection = .PERSPECTIVE,
+		}
 	}
 }
 
 create_fling :: proc(pbd_world: ^PBD_World) -> Fling {
     fmt.println("fling")
-	center := pbd_create_point(pbd_world, rl.Vector3{0, 0, 0})
 
-    create_ball(pbd_world, center)
+    fling := Fling{}
+	center := pbd_create_point(pbd_world, rl.Vector3{100, 100, 100})
+    //create_ball(pbd_world, center)
+    create_tetrahedron(pbd_world, center)
 
-	fling := Fling{
-		Center = center,
-	}
+	fling.Center = center
+
 
 	return fling
 }
 
 simulate_fling :: proc(fling: ^Fling) {
+    if g.input_intent.button_a {
+        fling.Center.velocity.y += 5
+    }
 
+    // Update rotation based on look input
+    look_sensitivity :: 2.0
+    look_x := g.input_intent.look_x 
+    look_y := g.input_intent.look_y
+    if math.abs(look_x) < 0.3 {look_x = 0}
+    if math.abs(look_y) < 0.3 {look_y = 0}
+    fling.rotation.y += look_x * -look_sensitivity * rl.GetFrameTime() // Horizontal rotation
+    fling.rotation.x += look_y * look_sensitivity * rl.GetFrameTime() // Vertical rotation
+
+    // Clamp vertical rotation to avoid over-rotation
+    max_vertical_angle :: math.PI * 0.4 // About 72 degrees up/down
+    fling.rotation.x = clamp(fling.rotation.x, -max_vertical_angle, max_vertical_angle)
+
+    // Movement
+    move_speed :: 1
+    move_x := g.input_intent.move_x
+    move_z := g.input_intent.move_z
+    if math.abs(move_x) < 0.3 {move_x = 0}
+    if math.abs(move_z) < 0.3 {move_z = 0}
+
+    // Get forward vector from rotation (ignoring vertical component)
+    forward := rl.Vector3{
+        math.sin(fling.rotation.y),
+        0,
+        math.cos(fling.rotation.y),
+    }
+    // Get right vector by rotating forward 90 degrees
+    right := rl.Vector3{
+        math.sin(fling.rotation.y + math.PI/2),
+        0,
+        math.cos(fling.rotation.y + math.PI/2),
+    }
+
+    // Combine forward/back and right/left movement
+    move_direction := forward * -move_z + right * -move_x
+    move_velocity := move_direction * move_speed
+    fling.Center.velocity += move_velocity
+}
+
+draw_fling :: proc() {
+    // rotation
+    rl.DrawLine3D(g.fling.Center.position, 
+        {g.fling.Center.position.x + math.cos(g.fling.rotation.y), 
+         g.fling.Center.position.y, 
+         g.fling.Center.position.z + math.sin(g.fling.rotation.y)}, rl.RED)
 }
 
 
-create_ball :: proc(pbd_world: ^PBD_World, center: Point) {
-    /// create a isohedron
-    // points
-    top_points: [5]Point
-    bottom_points: [5]Point
-    for i in 0..<5{
-        top_points[i] = pbd_create_point(pbd_world, rl.Vector3{0, 0, 0})
-        bottom_points[i] = pbd_create_point(pbd_world, rl.Vector3{0, 0, 0})
-    }
-    top_point := pbd_create_point(pbd_world, rl.Vector3{0, 0, 0})
-    bottom_point := pbd_create_point(pbd_world, rl.Vector3{0, 0, 0})
+create_tetrahedron :: proc(pbd_world: ^PBD_World, center: ^Point) {
+    radius :f32= 20
+    cent :f32= math.sqrt_f32(6)/4
+    
+    // Create vertices of a regular tetrahedron
+    // The center point is at the barycenter (centroid)
+    p0 := pbd_create_point(pbd_world, center.position + rl.Vector3{radius * math.sqrt_f32(8/9), 0, -radius/3})
+    p1 := pbd_create_point(pbd_world, center.position + rl.Vector3{-radius * math.sqrt_f32(2/9), 0, radius * math.sqrt_f32(2/3)})
+    p2 := pbd_create_point(pbd_world, center.position + rl.Vector3{-radius * math.sqrt_f32(2/9), 0, -radius * math.sqrt_f32(2/3)})
+    p3 := pbd_create_point(pbd_world, center.position + rl.Vector3{0, radius, 0})
 
-    // springs
-    for i in 0..<5{
-        // top and bottom adjacent
-        pbd_create_spring(pbd_world, top_points[i].id, top_point.id, 1.0)
-        pbd_create_spring(pbd_world, bottom_points[i].id, bottom_point.id, 1.0)
-        // top and bottom neighbors
-        pbd_create_spring(pbd_world, top_points[i].id, top_points[(i+1)%5].id, 1.0)
-        pbd_create_spring(pbd_world, bottom_points[i].id, bottom_points[(i+1)%5].id, 1.0)
-        // top and bottom interconnect
-        pbd_create_spring(pbd_world, top_points[i].id, bottom_points[i].id, 1.0)
-        pbd_create_spring(pbd_world, top_points[i].id, bottom_points[(i+1)%5].id, 1.0)
+    // Create springs between all vertices to maintain shape
+    pbd_create_spring(pbd_world, p0.id, p1.id, radius)
+    pbd_create_spring(pbd_world, p0.id, p2.id, radius)
+    pbd_create_spring(pbd_world, p0.id, p3.id, radius)
+    pbd_create_spring(pbd_world, p1.id, p2.id, radius)
+    pbd_create_spring(pbd_world, p1.id, p3.id, radius)
+    pbd_create_spring(pbd_world, p2.id, p3.id, radius)
+
+    pbd_create_spring(pbd_world, p0.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p1.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p2.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p3.id, center.id, radius*cent)
+
+
+}
+
+create_ball :: proc(pbd_world: ^PBD_World, center: ^Point) {
+    /// create an icosahedron
+    radius :f32= 20.0
+    
+    // First create all points with proper initial positions
+    // Top point
+    top_point_idx := len(pbd_world.points)
+    top_point := pbd_create_point(pbd_world, center.position + rl.Vector3{0, radius, 0})
+    assert(int(top_point.id) == top_point_idx)
+    
+    // Bottom point
+    bottom_point_idx := len(pbd_world.points)
+    bottom_point := pbd_create_point(pbd_world, center.position + rl.Vector3{0, -radius, 0})
+    assert(int(bottom_point.id) == bottom_point_idx)
+    // Create arrays to store point indices rather than the points themselves
+    top_points_idx := make([]point_idx, 5)
+    bottom_points_idx := make([]point_idx, 5)
+    defer delete(top_points_idx)
+    defer delete(bottom_points_idx)
+    
+    golden_ratio :f32= (1.0 + math.sqrt(f32(5.0))) / 2.0
+    //golden_ratio = 1.3
+    
+    // Create top and bottom ring points
+    for i in 0..<5 {
+        angle := f32(i) * 2.0 * math.PI / 5.0
+        next_angle := f32((i+1) % 5) * 2.0 * math.PI / 5.0
+        
+        // Top ring points
+        x := math.cos(angle) * radius / golden_ratio
+        z := math.sin(angle) * radius / golden_ratio
+        y := radius / 2.0
+        top_idx := len(pbd_world.points)
+        pbd_create_point(pbd_world, center.position + rl.Vector3{x, y, z})
+        top_points_idx[i] = point_idx(top_idx)
+        
+        // Bottom ring points
+        x = math.cos(next_angle) * radius / golden_ratio
+        z = math.sin(next_angle) * radius / golden_ratio
+        y = -radius / 2.0
+        bottom_idx := len(pbd_world.points)
+        pbd_create_point(pbd_world, center.position + rl.Vector3{x, y, z})
+        bottom_points_idx[i] = point_idx(bottom_idx)
+    }
+
+    // Now create all springs using the stored indices
+    cent :f32= 0.951 
+    for i in 0..<5 {
+        // Connect to center
+        pbd_create_spring(pbd_world, top_points_idx[i], center.id, radius*cent)
+        pbd_create_spring(pbd_world, bottom_points_idx[i], center.id, radius*cent)
+        
+        // Connect to top/bottom points
+        pbd_create_spring(pbd_world, point_idx(top_point_idx), top_points_idx[i], radius)
+        pbd_create_spring(pbd_world, point_idx(bottom_point_idx), bottom_points_idx[i], radius)
+        
+        // Connect rings
+        pbd_create_spring(pbd_world, top_points_idx[i], top_points_idx[(i+1)%5], radius)
+        pbd_create_spring(pbd_world, bottom_points_idx[i], bottom_points_idx[(i+1)%5], radius)
+        
+        // Connect between rings
+        pbd_create_spring(pbd_world, top_points_idx[i], bottom_points_idx[i], radius)
+        pbd_create_spring(pbd_world, top_points_idx[i], bottom_points_idx[(i+1)%5], radius)
     }
     
-    // link to center
-    golden_ratio :f32= (1.0 + math.sqrt(f32(5.0))) / 2.0
-    for i in 0..<5{
-        pbd_create_spring(pbd_world, top_points[i].id, center.id, golden_ratio)
-        pbd_create_spring(pbd_world, bottom_points[i].id, center.id, golden_ratio)
-    }
+    // Connect top and bottom points to center
+    pbd_create_spring(pbd_world, point_idx(top_point_idx), center.id, radius*cent)
+    pbd_create_spring(pbd_world, point_idx(bottom_point_idx), center.id, radius*cent)
+}
 
-    pbd_create_spring(pbd_world, top_point.id, center.id, golden_ratio)
-    pbd_create_spring(pbd_world, bottom_point.id, center.id, golden_ratio)
+calc_fling_1st_person :: proc() {
+	// Set camera position to player position with a slight height offset for eye level
+	g.fling.frst_pos = g.fling.Center.position + rl.Vector3{0, 1.7, 0}  // Typical eye height
+	
+	// Convert player rotation to a point on unit sphere
+	// Assuming g.player.rotation contains pitch (x-axis) and yaw (y-axis) in radians
+	pitch := g.fling.rotation.x
+	yaw := g.fling.rotation.y
+	
+	// Calculate direction vector on unit sphere
+	x := linalg.sin(yaw) * linalg.cos(pitch) * 1
+	y := linalg.sin(pitch)
+	z := linalg.cos(yaw) * linalg.cos(pitch) * 1
+	direction := rl.Vector3{x, y, z}
+	
+	// Set look target as position + direction
+	g.fling.look_target = g.fling.frst_pos + direction
+}
+
+calc_fling_3rd_person :: proc() {
+    // Camera constants
+    CAMERA_DISTANCE :f32 = 20.0
+    CAMERA_HEIGHT :f32 = 10.0
+    HORIZONTAL_SMOOTHING :f32: 5.0 // Faster horizontal movement
+    VERTICAL_SMOOTHING :f32: 5.0  // Slower vertical movement
+    
+    // Calculate direction vector from rotation
+    pitch := g.fling.rotation.x
+    yaw := g.fling.rotation.y
+    
+    x := linalg.sin(yaw) * linalg.cos(pitch)
+    y := linalg.sin(pitch) 
+    z := linalg.cos(yaw) * linalg.cos(pitch)
+    look_dir := rl.Vector3{x, y, z}
+    
+    // Calculate ideal camera position behind the fling
+    base_camera_pos := g.fling.Center.position - look_dir * CAMERA_DISTANCE
+    
+    // Add height offset based on pitch
+    vertical_offset := CAMERA_HEIGHT * (1.0 - y)
+    ideal_camera_pos := base_camera_pos + rl.Vector3{0, vertical_offset, 0}
+    
+    // Split current and target positions into horizontal and vertical components
+    current_horizontal := rl.Vector3{g.fling.thrd_pos.x, 0, g.fling.thrd_pos.z}
+    current_vertical := rl.Vector3{0, g.fling.thrd_pos.y, 0}
+    
+    target_horizontal := rl.Vector3{ideal_camera_pos.x, 0, ideal_camera_pos.z}
+    target_vertical := rl.Vector3{0, ideal_camera_pos.y, 0}
+    
+    // Lerp horizontal and vertical components separately with different smoothing
+    new_horizontal := linalg.lerp(
+        current_horizontal,
+        target_horizontal,
+        min(1.0, rl.GetFrameTime() * HORIZONTAL_SMOOTHING),
+    )
+    
+    new_vertical := linalg.lerp(
+        current_vertical,
+        target_vertical,
+        min(1.0, rl.GetFrameTime() * VERTICAL_SMOOTHING),
+    )
+    
+    // Combine components for final camera position
+    g.fling.thrd_pos = new_horizontal + new_vertical
+    
+    g.fling.ideal_camera_pos = ideal_camera_pos
 }

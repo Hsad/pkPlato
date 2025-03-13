@@ -77,7 +77,7 @@ solve_player :: proc(dts: f32) {
     // cat          ; ledge, wall point, arms, feet
 }
 
-solve_spring :: proc(spring: ^Spring, dts: f32) {
+solve_spring_old :: proc(spring: ^Spring, dts: f32) {
     //fmt.println("solve_spring")
     point_a := &g.pbd_world.points[spring.point_a]
     point_b := &g.pbd_world.points[spring.point_b]
@@ -94,6 +94,48 @@ solve_spring :: proc(spring: ^Spring, dts: f32) {
     // Apply position corrections
     point_a.position += w0 * correction * delta_pos
     point_b.position -= w1 * correction * delta_pos
+}
+
+solve_spring :: proc(spring: ^Spring, dts: f32) {
+    point_a := &g.pbd_world.points[spring.point_a]
+    point_b := &g.pbd_world.points[spring.point_b]
+    
+    delta_pos := point_a.position - point_b.position
+    current_length := linalg.length(delta_pos)
+    
+    // Calculate constraint value (how far from desired length)
+    c := current_length - (spring.rest_length - 
+        (g.input_intent.trigger_left * spring.rest_length / 4) - 
+        (g.input_intent.trigger_right * spring.rest_length / 4))
+    
+    // Calculate inverse masses
+    w0 := point_a.mass > 0.0 ? 1.0 / point_a.mass : 0.0
+    w1 := point_b.mass > 0.0 ? 1.0 / point_b.mass : 0.0
+    
+    compliance :f32 = 0.002
+    if (g.input_intent.button_y) {
+        compliance = 0.02
+    }
+    lambda :f32 = 0.0
+    // Calculate compliance scaled by timestep (α̃ = α/h²)
+    alpha_tilde := compliance / (dts * dts)
+    
+    // Calculate Lagrange multiplier update (XPBD)
+    delta_lambda := (-c - alpha_tilde * lambda) / (w0 + w1 + alpha_tilde)
+    lambda += delta_lambda
+    
+    // Calculate the correction direction (normalized delta_pos)
+    direction := delta_pos
+    if current_length > 0.001 {  // Avoid division by zero
+        direction /= current_length
+    }
+    
+    // Apply the correction based on the Lagrange multiplier
+    correction := delta_lambda * direction
+    
+    // Apply position corrections
+    point_a.position += w0 * correction
+    point_b.position -= w1 * correction
 }
 
 solve_ground :: proc(point: ^Point, dts: f32) {
@@ -135,11 +177,13 @@ pbd_init_player :: proc(pbd_world: ^PBD_World) {
 }
 */
 
-pbd_create_point :: proc(pbd_world: ^PBD_World, position: rl.Vector3) -> Point {
+pbd_create_point :: proc(pbd_world: ^PBD_World, position: rl.Vector3) -> ^Point {
     len := len(pbd_world.points)
+    fmt.println("pbd_create_point", position, len)
     p := Point{position, position, {0, 0, 0}, {0, 0, 0}, 1.0, point_idx(len)}
     append(&pbd_world.points, p)
-    return p
+    fmt.println("pbd_create_point", p)
+    return &pbd_world.points[len]
 }
 
 pbd_create_spring :: proc(pbd_world: ^PBD_World, point_a: point_idx, point_b: point_idx, rest_length: f32) -> Spring {
@@ -231,7 +275,7 @@ pbd_create_box :: proc(pbd_world: ^PBD_World, position: rl.Vector3, size: rl.Vec
 
 pbd_draw_points :: proc(points: [dynamic]Point) {
     for i in 0..<len(points) {
-        rl.DrawSphere(points[i].position, 1.0, rl.ORANGE)
+        rl.DrawSphere(points[i].position, 1, rl.ORANGE)
     }
 }
 

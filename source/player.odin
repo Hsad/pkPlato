@@ -32,11 +32,11 @@ Player :: struct {
 }
 
 Player_PBD :: struct {
-	Core: Point,
-	Left_Leg: Point,
-	Right_Leg: Point,
-	Left_Arm: Point,
-	Right_Arm: Point,
+	Core: ^Point,
+	Left_Leg: ^Point,
+	Right_Leg: ^Point,
+	Left_Arm: ^Point,
+	Right_Arm: ^Point,
 
 	Left_Leg_Spring: Spring,
 	Right_Leg_Spring: Spring,

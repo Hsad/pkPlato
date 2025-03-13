@@ -77,7 +77,7 @@ game_init :: proc() {
 
 
 	pbd_world := pbd_init()
-	player_start_pos := rl.Vector3{0, 5, 0}  // Start a bit higher to see if gravity works
+	player_start_pos := rl.Vector3{100, 25, 100}  // Start a bit higher to see if gravity works
 	//append(&pbd_world.points, Point{player_start_pos, player_start_pos, {0, 0, 0}, {0, 0, 0}, 1.0, 0})
 	pbd_create_boxes(pbd_world)
 
@@ -122,6 +122,7 @@ game_init :: proc() {
 
 		pbd_world = pbd_world,
 		fling = fling,
+
 	}
 
 
@@ -136,9 +137,9 @@ update :: proc() {
 	player_controller_presim() // update player position
 	//g.pbd_world.points[0].velocity = g.player.vel
 
+	simulate_fling(&g.fling)
 	pbd_simulate(rl.GetFrameTime()) // simulate physics
 
-	simulate_fling(&g.fling)
 
 	//// control look target
 	//hight_change := g.pbd_world.points[0].position.y - g.player.pos.y
@@ -148,6 +149,9 @@ update :: proc() {
 	//g.player.vel = g.pbd_world.points[0].velocity
 
 	player_controller_postsim()
+
+	calc_fling_3rd_person()
+	calc_fling_1st_person()
 
 	calc_camera_3rd_person()
 	calc_camera_1st_person()
@@ -164,6 +168,10 @@ draw :: proc() {
 	//rl.BeginMode3D(game_camera())
 	rl.BeginMode3D(get_fling_camera())
 	rl.DrawModel(g.ground_model, {0, 0, 0}, 1, rl.WHITE)
+
+
+	// draw the fling
+	draw_fling()
 
 	// Draw the player as a small blue sphere
 	
