@@ -3,7 +3,7 @@ package game
 import rl "vendor:raylib"
 import math "core:math"
 import linalg "core:math/linalg"
-
+import fmt "core:fmt"
 Input_Intent :: struct {
 	move_x: f32,
 	move_z: f32,
@@ -23,29 +23,38 @@ Input_Intent :: struct {
     button_b: bool,
     button_x: bool,
     button_y: bool,
+
+	bounce: bool,
 }
 
 get_input_intent :: proc() {
+	g.input_previous = g.input_intent
     if rl.IsGamepadAvailable(0) {
-        g_mem.input_intent.move_x = rl.GetGamepadAxisMovement(0, .LEFT_X)
-        g_mem.input_intent.move_z = rl.GetGamepadAxisMovement(0, .LEFT_Y)
+        g.input_intent.move_x = rl.GetGamepadAxisMovement(0, .LEFT_X)
+        g.input_intent.move_z = rl.GetGamepadAxisMovement(0, .LEFT_Y)
 
-        g_mem.input_intent.look_x = rl.GetGamepadAxisMovement(0, .RIGHT_X)
-        g_mem.input_intent.look_y = rl.GetGamepadAxisMovement(0, .RIGHT_Y)
+        g.input_intent.look_x = rl.GetGamepadAxisMovement(0, .RIGHT_X)
+        g.input_intent.look_y = rl.GetGamepadAxisMovement(0, .RIGHT_Y)
 
-        g_mem.input_intent.right_stick = rl.IsGamepadButtonDown(0, .RIGHT_THUMB)
-        g_mem.input_intent.left_stick = rl.IsGamepadButtonDown(0, .LEFT_THUMB)
+        g.input_intent.right_stick = rl.IsGamepadButtonDown(0, .RIGHT_THUMB)
+        g.input_intent.left_stick = rl.IsGamepadButtonDown(0, .LEFT_THUMB)
 
-        g_mem.input_intent.trigger_left = rl.GetGamepadAxisMovement(0, .LEFT_TRIGGER)
-        g_mem.input_intent.trigger_right = rl.GetGamepadAxisMovement(0, .RIGHT_TRIGGER)
+        g.input_intent.trigger_left = rl.GetGamepadAxisMovement(0, .LEFT_TRIGGER)
+        g.input_intent.trigger_right = rl.GetGamepadAxisMovement(0, .RIGHT_TRIGGER)
 
-        g_mem.input_intent.bumper_left = rl.IsGamepadButtonDown(0, .LEFT_TRIGGER_1)
-        g_mem.input_intent.bumper_right = rl.IsGamepadButtonDown(0, .RIGHT_TRIGGER_1)
+        g.input_intent.bumper_left = rl.IsGamepadButtonDown(0, .LEFT_TRIGGER_1)
+        g.input_intent.bumper_right = rl.IsGamepadButtonDown(0, .RIGHT_TRIGGER_1)
 
-        g_mem.input_intent.button_a = rl.IsGamepadButtonDown(0, .RIGHT_FACE_DOWN)
-        g_mem.input_intent.button_b = rl.IsGamepadButtonDown(0, .RIGHT_FACE_RIGHT)
-        g_mem.input_intent.button_x = rl.IsGamepadButtonDown(0, .RIGHT_FACE_LEFT)
-        g_mem.input_intent.button_y = rl.IsGamepadButtonDown(0, .RIGHT_FACE_UP)
+        g.input_intent.button_a = rl.IsGamepadButtonDown(0, .RIGHT_FACE_DOWN)
+        g.input_intent.button_b = rl.IsGamepadButtonDown(0, .RIGHT_FACE_RIGHT)
+        g.input_intent.button_x = rl.IsGamepadButtonDown(0, .RIGHT_FACE_LEFT)
+        g.input_intent.button_y = rl.IsGamepadButtonDown(0, .RIGHT_FACE_UP)
+
+		g.input_intent.bounce = false
+    }
+
+    if rl.IsKeyPressed(.SPACE) {
+        g.camera.using_first_person = !g.camera.using_first_person
     }
 }
 
@@ -69,7 +78,7 @@ controller_input :: proc() {
 		if is_looking {
 			
 			// Rotate the look target around the player
-			current_target_offset := g_mem.player.look_target - g_mem.player.pos
+			current_target_offset := g.player.look_target - g.player.pos
 			yaw := look_x * LOOK_SENSITIVITY * rl.GetFrameTime()
 			
 			// Apply horizontal rotation (yaw)
@@ -99,18 +108,20 @@ controller_input :: proc() {
 			new_offset.y = horizontal_dist * math.tan(current_angle)
 			
 			// Maintain consistent distance from player
-			g_mem.player.look_target = g_mem.player.pos + linalg.normalize(new_offset) * LOOK_DISTANCE
+			g.player.look_target = g.player.pos + linalg.normalize(new_offset) * LOOK_DISTANCE
 		}
 
 		// Left analog stick movement (existing code)
 		x := rl.GetGamepadAxisMovement(0, .LEFT_X)
 		z := rl.GetGamepadAxisMovement(0, .LEFT_Y)
 
+		fmt.println("x", x, "z", z)
+
 		// Apply deadzone of 0.3 to handle controller drift
 		is_moving := abs(x) > 0.3 || abs(z) > 0.3
 		if is_moving {
 			// Calculate direction vector from player to look target, projected onto xz plane
-			look_dir := g_mem.player.look_target - g_mem.player.pos
+			look_dir := g.player.look_target - g.player.pos
 			look_dir.y = 0 // Project onto xz plane
 			look_dir = linalg.normalize(look_dir)
 			
@@ -123,7 +134,7 @@ controller_input :: proc() {
 			
 			//fmt.println("Input direction:", input)
 		} else {
-			g_mem.pbd_world.points[0].velocity *= {0.95, 1, 0.95}
+			g.pbd_world.points[0].velocity *= {0.95, 1, 0.95}
 		}
 		
 		
@@ -132,7 +143,7 @@ controller_input :: proc() {
 			RETURN_TO_LEVEL_SPEED :: 2.0 // Speed at which view returns to level
 			
 			// Get current offset and recalculate angle
-			current_offset := g_mem.player.look_target - g_mem.player.pos
+			current_offset := g.player.look_target - g.player.pos
 			horizontal_dist := math.sqrt(current_offset.x * current_offset.x + current_offset.z * current_offset.z)
 			current_angle := math.atan2(current_offset.y, horizontal_dist)
 			
@@ -151,13 +162,13 @@ controller_input :: proc() {
 			}
 			
 			// Maintain consistent distance from player
-			g_mem.player.look_target = g_mem.player.pos + linalg.normalize(new_offset) * LOOK_DISTANCE
+			g.player.look_target = g.player.pos + linalg.normalize(new_offset) * LOOK_DISTANCE
 		}
 
 		// Get current velocity from physics system
-		//current_vel := get_velocity(g_mem.physics_world, g_mem.player_physics_body_index)
+		//current_vel := get_velocity(g.physics_world, g.player_physics_body_index)
 		//physics_vel := rl.Vector3{current_vel.x, current_vel.y, current_vel.z}
-		physics_vel := g_mem.pbd_world.points[0].velocity
+		physics_vel := g.pbd_world.points[0].velocity
 		//fmt.println("Current physics velocity before:", physics_vel)
 		
 		// Apply movement forces to physics body
@@ -190,8 +201,8 @@ controller_input :: proc() {
 			//fmt.println("Applied force:", move_force, "New velocity:", physics_vel)
 			
 			// Apply velocity to physics body
-			//set_velocity(g_mem.physics_world, g_mem.player_physics_body_index, physics_vel, {0, 0, 0})
-			g_mem.pbd_world.points[0].velocity = physics_vel
+			//set_velocity(g.physics_world, g.player_physics_body_index, physics_vel, {0, 0, 0})
+			g.pbd_world.points[0].velocity = physics_vel
 		}
 		
 		// Jump physics
@@ -200,12 +211,12 @@ controller_input :: proc() {
 			JUMP_FORCE :: f32(15.0)  // Increased jump force
 			physics_vel.y = JUMP_FORCE
 			//fmt.println("Applying jump force:", JUMP_FORCE, "New velocity:", physics_vel)
-			//set_velocity(g_mem.physics_world, g_mem.player_physics_body_index, physics_vel, {0, 0, 0})
-			g_mem.pbd_world.points[0].velocity.y = JUMP_FORCE
+			//set_velocity(g.physics_world, g.player_physics_body_index, physics_vel, {0, 0, 0})
+			g.pbd_world.points[0].velocity.y = JUMP_FORCE
 		}
 	}
 	
 	// Update look target position based on player movement
 	// This is done after physics update in the update function
-	g_mem.player.look_target += input * rl.GetFrameTime() * 100
+	g.player.look_target += input * rl.GetFrameTime() * 100
 }

@@ -1,7 +1,6 @@
 package game
 
 import "core:fmt"
-//import "core:math"
 import "core:math/linalg"
 import rl "vendor:raylib"
 
@@ -9,6 +8,7 @@ Point :: struct {
     position: rl.Vector3,
     prev_pos: rl.Vector3,
     velocity: rl.Vector3,
+    prev_vel: rl.Vector3,
     mass: f32,
     id: int,
 }
@@ -30,34 +30,55 @@ PBD_World :: struct {
 
 pbd_simulate :: proc(delta_time: f32) {
     //fmt.println("pbd_simulate")
-    dts := delta_time / f32(g_mem.pbd_world.substeps)
+    dts := delta_time / f32(g.pbd_world.substeps)
     gravity := rl.Vector3{0, -9.81, 0}
-    for _ in 0..<g_mem.pbd_world.substeps {
-        for i in 0..<len(g_mem.pbd_world.points) {
-            g_mem.pbd_world.points[i].velocity = g_mem.pbd_world.points[i].velocity + dts*gravity
-            g_mem.pbd_world.points[i].prev_pos = g_mem.pbd_world.points[i].position
-            g_mem.pbd_world.points[i].position = g_mem.pbd_world.points[i].position + dts*g_mem.pbd_world.points[i].velocity
+    for _ in 0..<g.pbd_world.substeps {
+        // prev_pos, gravity, add velocity
+        for i in 0..<len(g.pbd_world.points) {
+            g.pbd_world.points[i].prev_vel = g.pbd_world.points[i].velocity
+            g.pbd_world.points[i].velocity = g.pbd_world.points[i].velocity + dts*gravity
+            g.pbd_world.points[i].prev_pos = g.pbd_world.points[i].position
+            g.pbd_world.points[i].position = g.pbd_world.points[i].position + dts*g.pbd_world.points[i].velocity
+        }
+        // constraints
+        for i in 0..<len(g.pbd_world.points) {
+            solve_ground(&g.pbd_world.points[i], dts)
+        }
+        for i in 0..<len(g.pbd_world.springs) { //solve springs
+            solve_spring(&g.pbd_world.springs[i], dts)
+        }
+        // update velocity
+        for i in 0..<len(g.pbd_world.points) {
+            g.pbd_world.points[i].velocity = (g.pbd_world.points[i].position - g.pbd_world.points[i].prev_pos) / dts
         }
 
-        for i in 0..<len(g_mem.pbd_world.points) {
-            solve_ground(&g_mem.pbd_world.points[i], dts)
-        }
-
-        for i in 0..<len(g_mem.pbd_world.springs) { //solve springs
-            //fmt.println("i", i)
-            solve_spring(&g_mem.pbd_world.springs[i], dts)
-        }
-
-        for i in 0..<len(g_mem.pbd_world.points) {
-            g_mem.pbd_world.points[i].velocity = (g_mem.pbd_world.points[i].position - g_mem.pbd_world.points[i].prev_pos) / dts
-        }
+        solve_player(dts)
     }
+}
+
+solve_player :: proc(dts: f32) {
+
+    /*
+    feet contact ground
+    wall kick contacts wall, sticks, kicks upwards/sideways
+    foot body spring, change to spring
+    */
+
+    // standing     ; ground point, feet
+    // moveing      ; ground point, feet
+    // jumping      ; ground point, feet
+    // tack         ; wall point, side foot
+    // falling      ; physics
+    // crouching    ; ground point, feet
+    // landing      ; ground point, feet
+    // climbing     ; ledge, wall point, arms, feet
+    // cat          ; ledge, wall point, arms, feet
 }
 
 solve_spring :: proc(spring: ^Spring, dts: f32) {
     //fmt.println("solve_spring")
-    point_a := &g_mem.pbd_world.points[spring.point_a]
-    point_b := &g_mem.pbd_world.points[spring.point_b]
+    point_a := &g.pbd_world.points[spring.point_a]
+    point_b := &g.pbd_world.points[spring.point_b]
     delta_pos := point_a.position - point_b.position
     current_length := linalg.length(delta_pos)
     //fmt.println("current_length", current_length)
@@ -74,10 +95,18 @@ solve_spring :: proc(spring: ^Spring, dts: f32) {
 }
 
 solve_ground :: proc(point: ^Point, dts: f32) {
+    
     if point.position.y < 0 {
+        // Set position to ground
         point.position.y = 0
     }
+
+    collision_point, normal := grid_collision(point)
+    point.position = collision_point
+    point.velocity = point.velocity * 0.95
+    point.velocity = point.velocity + normal * 0.1
 }
+
 pbd_init :: proc() -> ^PBD_World {
     fmt.println("pbd_init")
     pbd_world := new(PBD_World)
@@ -88,18 +117,35 @@ pbd_init :: proc() -> ^PBD_World {
     return pbd_world
 }
 
+/*
+pbd_init_player :: proc(pbd_world: ^PBD_World) {
+    g.player.pos
+    g.player.vel
+
+    g.player.foot_pos
+    g.player.foot_vel
+    g.player.foot_dist  // distance to core
+    g.player.foot_sprint_idx  // index of sprint point
+
+    g.player.arm_pos
+    g.player.arm_vel
+    g.player.arm_dist  // distance to core
+    g.player.arm_sprint_idx  // index of sprint point
+}
+*/
+
 pbd_create_boxes :: proc(pbd_world: ^PBD_World) {
     fmt.println("pbd_create_boxes")
     pbd_create_box(pbd_world, {2, 20, 0}, {10, 10, 10}, 1.0)
     pbd_create_box(pbd_world, {-2, 20, 0}, {10, 10, 10}, 1.0)
     pbd_create_box(pbd_world, {2, 10, 0}, {5, 5, 5}, 1.0)
 
-    for _ in 0..<10 {
+    for _ in 0..<50 {
         random_size := f32(rl.GetRandomValue(1, 10))
         random_position := rl.Vector3{
-            f32(rl.GetRandomValue(-30, 30)), 
-            f32(rl.GetRandomValue(-30, 30)), 
-            f32(rl.GetRandomValue(-30, 30))}
+            f32(rl.GetRandomValue(30, 130)), 
+            f32(rl.GetRandomValue(30, 130)), 
+            f32(rl.GetRandomValue(30, 130))}
         pbd_create_box(pbd_world, random_position, {random_size, random_size, random_size}, 1.0)
     }
 }
@@ -114,14 +160,14 @@ pbd_create_box :: proc(pbd_world: ^PBD_World, position: rl.Vector3, size: rl.Vec
     fmt.printf("len(pbd_world.points): %v\n", len(pbd_world.points))
     fmt.println("pbd_create_box")
     box := [8]Point{
-        {position + rl.Vector3{-size.x/2, -size.y/2, -size.z/2}, position, {0, 0, 0}, mass, 0},
-        {position + rl.Vector3{size.x/2, -size.y/2, -size.z/2}, position, {0, 0, 0}, mass, 0},
-        {position + rl.Vector3{-size.x/2, size.y/2, -size.z/2}, position, {0, 0, 0}, mass, 0},
-        {position + rl.Vector3{size.x/2, size.y/2, -size.z/2}, position, {10, 0, 0}, mass, 0},
-        {position + rl.Vector3{-size.x/2, -size.y/2, size.z/2}, position, {0, 0, 0}, mass, 0},
-        {position + rl.Vector3{size.x/2, -size.y/2, size.z/2}, position, {0, 10, 0}, mass, 0},
-        {position + rl.Vector3{-size.x/2, size.y/2, size.z/2}, position, {0, 0, 0}, mass, 0},
-        {position + rl.Vector3{size.x/2, size.y/2, size.z/2}, position, {0, 0, 0}, mass, 0},
+        {position + rl.Vector3{-size.x/2, -size.y/2, -size.z/2}, position, {0, 0, 0}, {0, 0, 0}, mass, 0},
+        {position + rl.Vector3{size.x/2, -size.y/2, -size.z/2}, position, {0, 0, 0}, {0, 0, 0}, mass, 0},
+        {position + rl.Vector3{-size.x/2, size.y/2, -size.z/2}, position, {0, 0, 0}, {0, 0, 0}, mass, 0},
+        {position + rl.Vector3{size.x/2, size.y/2, -size.z/2}, position, {0, 0, 0}, {0, 0, 0}, mass, 0},
+        {position + rl.Vector3{-size.x/2, -size.y/2, size.z/2}, position, {0, 0, 0}, {0, 0, 0}, mass, 0},
+        {position + rl.Vector3{size.x/2, -size.y/2, size.z/2}, position, {0, 0, 0}, {0, 0, 0}, mass, 0},
+        {position + rl.Vector3{-size.x/2, size.y/2, size.z/2}, position, {0, 0, 0}, {0, 0, 0}, mass, 0},
+        {position + rl.Vector3{size.x/2, size.y/2, size.z/2}, position, {0, 0, 0}, {0, 0, 0}, mass, 0},
     }
     for i in 0..<len(box) {
         //fmt.println("box[i]", box[i])
@@ -178,6 +224,6 @@ pbd_draw_springs :: proc(springs: [dynamic]Spring) {
     for i in 0..<len(springs) {
         idx_a := springs[i].point_a
         idx_b := springs[i].point_b
-        rl.DrawLine3D(g_mem.pbd_world.points[idx_a].position, g_mem.pbd_world.points[idx_b].position, rl.BLACK)
+        rl.DrawLine3D(g.pbd_world.points[idx_a].position, g.pbd_world.points[idx_b].position, rl.RAYWHITE)
     }
 }

@@ -17,7 +17,7 @@ also used in order to facilitate the hot reload functionality:
 
 - game_memory: Run just before a hot reload. That way game_hot_reload.exe has a
       pointer to the game's memory that it can hand to the new game DLL.
-- game_hot_reloaded: Run after a hot reload so that the `g_mem` global
+- game_hot_reloaded: Run after a hot reload so that the `g` global
       variable can be set to whatever pointer it was in the old DLL.
 
 NOTE: When compiled as part of `build_release`, `build_debug` or `build_web`
@@ -43,6 +43,7 @@ Game_Memory :: struct {
 	debug: Debug_data,
 
 	input_intent: Input_Intent,
+	input_previous	: Input_Intent,
 	player: Player,
 	camera: Camera,
 
@@ -53,7 +54,7 @@ Game_Memory :: struct {
 	pbd_world: ^PBD_World,
 }
 
-g_mem: ^Game_Memory
+g: ^Game_Memory
 
 ui_camera :: proc() -> rl.Camera2D {
 	return {
@@ -63,7 +64,7 @@ ui_camera :: proc() -> rl.Camera2D {
 
 @(export)
 game_init :: proc() {
-	g_mem = new(Game_Memory)
+	g = new(Game_Memory)
 
 	ground_img := rl.GenImagePerlinNoise(256,256,0,0,1)
 	defer rl.UnloadImage(ground_img)
@@ -75,7 +76,7 @@ game_init :: proc() {
 
 	pbd_world := pbd_init()
 	player_start_pos := rl.Vector3{0, 5, 0}  // Start a bit higher to see if gravity works
-	append(&pbd_world.points, Point{player_start_pos, player_start_pos, {0, 0, 0}, 1.0, 0})
+	//append(&pbd_world.points, Point{player_start_pos, player_start_pos, {0, 0, 0}, {0, 0, 0}, 1.0, 0})
 	pbd_create_boxes(pbd_world)
 
 	ground_grid := init_ground_grid()
@@ -89,9 +90,15 @@ game_init :: proc() {
 	player := Player{
 		pos = player_start_pos,
 		look_target = player_start_pos + rl.Vector3{10, 0, 0},
+
+		wall_run = rl.Vector3{1,0,0},
+		tac_left = rl.Vector3{0,0,1},
+		tac_right = rl.Vector3{0,0,-1},
+		climb_up = rl.Vector3{0.3,1,0},
+		upright = rl.Vector3{0,-1,0},
 	}
 
-	g_mem^ = Game_Memory {
+	g^ = Game_Memory {
 		run = true,
 
 		// You can put textures, sounds and music in the `assets` folder. Those
@@ -107,7 +114,7 @@ game_init :: proc() {
 		pbd_world = pbd_world,
 	}
 
-	game_hot_reloaded(g_mem)
+	game_hot_reloaded(g)
 }
 
 update :: proc() {
@@ -115,23 +122,26 @@ update :: proc() {
 	//controller_input() // build input state
 	get_input_intent()
 
-	player_controller() // update player position
-	g_mem.pbd_world.points[0].velocity = g_mem.player.vel
+	player_controller_presim() // update player position
+	//g.pbd_world.points[0].velocity = g.player.vel
 
 	pbd_simulate(rl.GetFrameTime()) // simulate physics
 
-	// control look target
-	hight_change := g_mem.pbd_world.points[0].position.y - g_mem.player.pos.y
-	g_mem.player.look_target.y += hight_change
-	// update player position
-	g_mem.player.pos = g_mem.pbd_world.points[0].position
-	g_mem.player.vel = g_mem.pbd_world.points[0].velocity
+
+	//// control look target
+	//hight_change := g.pbd_world.points[0].position.y - g.player.pos.y
+	//g.player.look_target.y += hight_change
+	//// update player position
+	//g.player.pos = g.pbd_world.points[0].position
+	//g.player.vel = g.pbd_world.points[0].velocity
+
+	player_controller_postsim()
 
 	calc_camera_3rd_person()
 	calc_camera_1st_person()
 
 	//if rl.IsKeyPressed(.ESCAPE) {
-	//	g_mem.run = false
+	//	g.run = false
 	//}
 }
 
@@ -141,26 +151,27 @@ draw :: proc() {
 
 	rl.BeginMode3D(game_camera())
 
-	rl.DrawModel(g_mem.ground_model, {0, 0, 0}, 1, rl.WHITE)
+	rl.DrawModel(g.ground_model, {0, 0, 0}, 1, rl.WHITE)
 
 	// Draw the player as a small blue sphere
-	rl.DrawSphere(g_mem.player.pos, 1.0, rl.BLUE)
 	
 	// Draw the ideal camera position as a small green sphere
-	rl.DrawSphere(g_mem.debug.ideal_camera_pos, 0.3, rl.GREEN)
-	rl.DrawLine3D(g_mem.player.pos, g_mem.debug.ideal_camera_pos, rl.GREEN)
+	//rl.DrawSphere(g.debug.ideal_camera_pos, 0.3, rl.GREEN)
+	//rl.DrawLine3D(g.player.pos, g.debug.ideal_camera_pos, rl.GREEN)
 	// Draw the look target as a small yellow sphere
-	rl.DrawLine3D(g_mem.player.pos, g_mem.player.look_target, rl.YELLOW)
-	rl.DrawSphere(g_mem.player.look_target, 0.3, rl.YELLOW)
+	rl.DrawLine3D(g.player.pos, g.player.look_target, rl.YELLOW)
+	//rl.DrawSphere(g.player.look_target, 0.3, rl.YELLOW)
 
 	// simple pbd
-	pbd_draw_points(g_mem.pbd_world.points)
-	pbd_draw_springs(g_mem.pbd_world.springs)
+	//pbd_draw_points(g.pbd_world.points)
+	pbd_draw_springs(g.pbd_world.springs)
 
 	//debug
-	rl.DrawSphere(g_mem.debug.nearest_point, 0.3, rl.RED)
+	rl.DrawSphere(g.debug.nearest_point, 0.3, rl.RED)
 
 	draw_ground_grid()
+
+	draw_player()
 
 	rl.EndMode3D()
 
@@ -170,7 +181,7 @@ draw :: proc() {
 	// NOTE: `fmt.ctprintf` uses the temp allocator. The temp allocator is
 	// cleared at the end of the frame by the main application, meaning inside
 	// `main_hot_reload.odin`, `main_release.odin` or `main_web_entry.odin`.
-	//rl.DrawText(fmt.ctprintf("some_number: %v\nplayer_pos: %v", g_mem.some_number, g_mem.player_pos), 5, 5, 8, rl.WHITE)
+	//rl.DrawText(fmt.ctprintf("some_number: %v\nplayer_pos: %v", g.some_number, g.player_pos), 5, 5, 8, rl.WHITE)
 	// frame time and frame rate
 	rl.DrawText(fmt.ctprintf("ft: %v\nfps: %v", rl.GetFrameTime(), rl.GetFPS()), 5, 5, 8, rl.WHITE)
 
@@ -204,23 +215,23 @@ game_should_run :: proc() -> bool {
 		}
 	}
 
-	return g_mem.run
+	return g.run
 }
 
 @(export)
 game_shutdown :: proc() {
 	// Clean up physics resources
-	//if g_mem.physics_world != nil {
-	//	destroy_physics_world(g_mem.physics_world)
+	//if g.physics_world != nil {
+	//	destroy_physics_world(g.physics_world)
 	//}
-	//delete(g_mem.physics_bodies)
+	//delete(g.physics_bodies)
 	
-	if g_mem.pbd_world != nil {
-		pbd_deinit(g_mem.pbd_world)
+	if g.pbd_world != nil {
+		pbd_deinit(g.pbd_world)
 	}
 
-	
-	free(g_mem)
+	deinit_ground_grid(&g.ground_grid)
+	free(g)
 }
 
 @(export)
@@ -230,7 +241,7 @@ game_shutdown_window :: proc() {
 
 @(export)
 game_memory :: proc() -> rawptr {
-	return g_mem
+	return g
 }
 
 @(export)
@@ -240,11 +251,11 @@ game_memory_size :: proc() -> int {
 
 @(export)
 game_hot_reloaded :: proc(mem: rawptr) {
-	g_mem = (^Game_Memory)(mem)
+	g = (^Game_Memory)(mem)
 
 	// Here you can also set your own global variables. A good idea is to make
 	// your global variables into pointers that point to something inside
-	// `g_mem`.
+	// `g`.
 }
 
 @(export)
