@@ -1,16 +1,15 @@
 package game
 
-import "core:fmt"
 import "core:math/linalg"
 import rl "vendor:raylib"
-
+import "core:fmt"
 Point :: struct {
     position: rl.Vector3,
     prev_pos: rl.Vector3,
     velocity: rl.Vector3,
     prev_vel: rl.Vector3,
     mass: f32,
-    id: int,
+    id: point_idx,
 }
 
 point_idx :: distinct int
@@ -28,8 +27,8 @@ PBD_World :: struct {
 }
 
 
+
 pbd_simulate :: proc(delta_time: f32) {
-    //fmt.println("pbd_simulate")
     dts := delta_time / f32(g.pbd_world.substeps)
     gravity := rl.Vector3{0, -9.81, 0}
     for _ in 0..<g.pbd_world.substeps {
@@ -42,6 +41,9 @@ pbd_simulate :: proc(delta_time: f32) {
         }
         // constraints
         for i in 0..<len(g.pbd_world.points) {
+            if i > 420 {
+                fmt.println("points[%d]", i, g.pbd_world.points[i])
+            }
             solve_ground(&g.pbd_world.points[i], dts)
         }
         for i in 0..<len(g.pbd_world.springs) { //solve springs
@@ -108,7 +110,6 @@ solve_ground :: proc(point: ^Point, dts: f32) {
 }
 
 pbd_init :: proc() -> ^PBD_World {
-    fmt.println("pbd_init")
     pbd_world := new(PBD_World)
     pbd_world.points = make([dynamic]Point)
     pbd_world.springs = make([dynamic]Spring)
@@ -134,8 +135,24 @@ pbd_init_player :: proc(pbd_world: ^PBD_World) {
 }
 */
 
+pbd_create_point :: proc(pbd_world: ^PBD_World, position: rl.Vector3) -> Point {
+    len := len(pbd_world.points)
+    p := Point{position, position, {0, 0, 0}, {0, 0, 0}, 1.0, point_idx(len)}
+    append(&pbd_world.points, p)
+    return p
+}
+
+pbd_create_spring :: proc(pbd_world: ^PBD_World, point_a: point_idx, point_b: point_idx, rest_length: f32) -> Spring {
+    s := Spring{point_a, point_b, rest_length}
+    append(&pbd_world.springs, s)
+    return s
+}
+
+pbd_set_position :: proc(point: ^Point, position: rl.Vector3) {
+    point.position = position
+}
+
 pbd_create_boxes :: proc(pbd_world: ^PBD_World) {
-    fmt.println("pbd_create_boxes")
     pbd_create_box(pbd_world, {2, 20, 0}, {10, 10, 10}, 1.0)
     pbd_create_box(pbd_world, {-2, 20, 0}, {10, 10, 10}, 1.0)
     pbd_create_box(pbd_world, {2, 10, 0}, {5, 5, 5}, 1.0)
@@ -157,8 +174,6 @@ pbd_deinit :: proc(pbd_world: ^PBD_World) {
 }
 
 pbd_create_box :: proc(pbd_world: ^PBD_World, position: rl.Vector3, size: rl.Vector3, mass: f32) {
-    fmt.printf("len(pbd_world.points): %v\n", len(pbd_world.points))
-    fmt.println("pbd_create_box")
     box := [8]Point{
         {position + rl.Vector3{-size.x/2, -size.y/2, -size.z/2}, position, {0, 0, 0}, {0, 0, 0}, mass, 0},
         {position + rl.Vector3{size.x/2, -size.y/2, -size.z/2}, position, {0, 0, 0}, {0, 0, 0}, mass, 0},
@@ -173,7 +188,7 @@ pbd_create_box :: proc(pbd_world: ^PBD_World, position: rl.Vector3, size: rl.Vec
         //fmt.println("box[i]", box[i])
         box[i].mass = mass
         //fmt.println("box[i].mass", box[i].mass)
-        box[i].id = len(pbd_world.points)
+        box[i].id = point_idx(len(pbd_world.points))
         //fmt.println("box[i].id", box[i].id)
         append(&pbd_world.points, box[i])
         //fmt.println("pbd_world.points", pbd_world.points)

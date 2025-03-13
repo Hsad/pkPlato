@@ -87,6 +87,9 @@ game_init :: proc() {
 		thrd_pos = {player_start_pos.x - 10, player_start_pos.y + 5, player_start_pos.z},
 	}
 
+
+	pbd := init_player_pbd(pbd_world, player_start_pos)
+
 	player := Player{
 		pos = player_start_pos,
 		look_target = player_start_pos + rl.Vector3{10, 0, 0},
@@ -95,8 +98,12 @@ game_init :: proc() {
 		tac_left = rl.Vector3{0,0,1},
 		tac_right = rl.Vector3{0,0,-1},
 		climb_up = rl.Vector3{0.3,1,0},
-		upright = rl.Vector3{0,-1,0},
+		upright = rl.Vector3{0,-3,0},
+
+		pbd = pbd,
 	}
+
+
 
 	g^ = Game_Memory {
 		run = true,
@@ -113,6 +120,7 @@ game_init :: proc() {
 
 		pbd_world = pbd_world,
 	}
+
 
 	game_hot_reloaded(g)
 }
@@ -163,8 +171,10 @@ draw :: proc() {
 	//rl.DrawSphere(g.player.look_target, 0.3, rl.YELLOW)
 
 	// simple pbd
-	//pbd_draw_points(g.pbd_world.points)
+	pbd_draw_points(g.pbd_world.points)
 	pbd_draw_springs(g.pbd_world.springs)
+
+	rl.DrawLine3D(g.player.pbd.Core.position, g.player.pos, rl.RED)
 
 	//debug
 	rl.DrawSphere(g.debug.nearest_point, 0.3, rl.RED)

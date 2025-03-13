@@ -1,9 +1,7 @@
 package game
 
 import rl "vendor:raylib"
-import math "core:math"
-import linalg "core:math/linalg"
-import fmt "core:fmt"
+
 Input_Intent :: struct {
 	move_x: f32,
 	move_z: f32,
@@ -58,7 +56,7 @@ get_input_intent :: proc() {
     }
 }
 
-
+/*
 controller_input :: proc() {
 	input: rl.Vector3
 
@@ -220,3 +218,5 @@ controller_input :: proc() {
 	// This is done after physics update in the update function
 	g.player.look_target += input * rl.GetFrameTime() * 100
 }
+
+*/
