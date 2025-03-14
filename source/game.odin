@@ -29,7 +29,7 @@ package game
 
 import "core:fmt"
 import rl "vendor:raylib"
-
+import "core:math/ease"
 PIXEL_WINDOW_HEIGHT :: 180
 
 Debug_data :: struct {
@@ -39,7 +39,7 @@ Debug_data :: struct {
 
 Game_Memory :: struct {
 	run: bool,
-
+	skip: bool,
 	debug: Debug_data,
 
 	input_intent: Input_Intent,
@@ -54,6 +54,12 @@ Game_Memory :: struct {
 	pbd_world: ^PBD_World,
 
 	fling: Fling,
+
+	shader: rl.Shader,
+	material: rl.Material,
+	model: rl.Model,
+
+	fuel: f32,
 }
 
 g: ^Game_Memory
@@ -77,7 +83,7 @@ game_init :: proc() {
 
 
 	pbd_world := pbd_init()
-	player_start_pos := rl.Vector3{100, 25, 100}  // Start a bit higher to see if gravity works
+	player_start_pos := rl.Vector3{1, 25, 1}  // Start a bit higher to see if gravity works
 	//append(&pbd_world.points, Point{player_start_pos, player_start_pos, {0, 0, 0}, {0, 0, 0}, 1.0, 0})
 	pbd_create_boxes(pbd_world)
 
@@ -107,8 +113,12 @@ game_init :: proc() {
 
 	fling := create_fling(pbd_world)
 
+	shader, material, model := init_shader()
 	g^ = Game_Memory {
 		run = true,
+		skip = true,
+
+		fuel = 1000,
 
 		// You can put textures, sounds and music in the `assets` folder. Those
 		// files will be part any release or web build.
@@ -123,8 +133,13 @@ game_init :: proc() {
 		pbd_world = pbd_world,
 		fling = fling,
 
+
+		shader = shader,
+		material = material,
+		model = model,
 	}
 
+	init_matrices() //for drawing
 
 	game_hot_reloaded(g)
 }
@@ -138,7 +153,10 @@ update :: proc() {
 	//g.pbd_world.points[0].velocity = g.player.vel
 
 	simulate_fling(&g.fling)
-	pbd_simulate(rl.GetFrameTime()) // simulate physics
+	if !g.skip {
+		pbd_simulate(rl.GetFrameTime()) // simulate physics
+	}
+	g.skip = false
 
 
 	//// control look target
@@ -167,11 +185,18 @@ draw :: proc() {
 
 	//rl.BeginMode3D(game_camera())
 	rl.BeginMode3D(get_fling_camera())
-	rl.DrawModel(g.ground_model, {0, 0, 0}, 1, rl.WHITE)
+	//rl.DrawModel(g.ground_model, {0, 0, 0}, 1, rl.WHITE)
 
 
 	// draw the fling
-	draw_fling()
+	//draw_fling()
+
+	draw_instanced_cube(g.model, []rl.Vector3{
+		{0,0,0},
+		{1,0,0},
+		{0,1,0},
+		{0,0,1},
+	})
 
 	// Draw the player as a small blue sphere
 	
@@ -183,7 +208,7 @@ draw :: proc() {
 	//rl.DrawSphere(g.player.look_target, 0.3, rl.YELLOW)
 
 	// simple pbd
-	pbd_draw_points(g.pbd_world.points)
+	//pbd_draw_points(g.pbd_world.points)
 	pbd_draw_springs(g.pbd_world.springs)
 
 	rl.DrawLine3D(g.player.pbd.Core.position, g.player.pos, rl.RED)
@@ -192,8 +217,9 @@ draw :: proc() {
 	rl.DrawSphere(g.debug.nearest_point, 0.3, rl.RED)
 
 	draw_ground_grid()
+	draw_ground_grid_wire()
 
-	draw_player()
+	//draw_player()
 
 	rl.EndMode3D()
 
@@ -210,7 +236,13 @@ draw :: proc() {
 	center := g.fling.Center.position
 	_, _, height := get_box_at_position(center)
 	dist := center.y - height
-	rl.DrawText(fmt.ctprintf("dist: %v", dist), 5, 45, 8, rl.WHITE)
+	rl.DrawText(fmt.ctprintf("dist: %v", dist), 5, 35, 8, rl.WHITE)
+	rl.DrawText(fmt.ctprintf("fuel: %v", int(g.fuel)), 5, 50, 8, rl.WHITE)
+
+	rl.DrawText(fmt.ctprintf("trigger_left: %v", g.input_intent.trigger_left), 5, 65, 8, rl.WHITE)
+	trig := g.input_intent.trigger_left
+	e := ease.sine_out((trig + 1)/2)
+	rl.DrawText(fmt.ctprintf("ease: %v", e), 5, 80, 8, rl.WHITE)
 
 	rl.EndMode2D()
 

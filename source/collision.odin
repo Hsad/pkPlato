@@ -9,19 +9,28 @@ Ground_Grid :: struct {
     pixels: [^]rl.Color,
     width: int,
     current_color: box_color,
+    cubemesh: rl.Mesh,
+    cubemodel: rl.Model,
+    material: rl.Material,
+    matrices: [dynamic]rl.Matrix,
 }
+
+terrain_model_big: rl.Model
+terrain_model_small: rl.Model
 
 box_color :: distinct int
 
 TILE_SIZE :: 10
 HEIGHT_SCALE :: 10
-
+GRID_LEN :: 50
+GRID_WIDTH :: 50
+GRID_SIZE :: GRID_LEN * GRID_WIDTH
 init_ground_grid :: proc() -> Ground_Grid {
     fmt.println("init_ground_grid")
-    r_image := rl.GenImageCellular(100, 100, 5)
-    g_image := rl.GenImageCellular(100, 100, 5)
-    b_image := rl.GenImageCellular(100, 100, 5)
-    a_image := rl.GenImageCellular(100, 100, 5)
+    r_image := rl.GenImageCellular(GRID_LEN, GRID_WIDTH, 5)
+    g_image := rl.GenImageCellular(GRID_LEN, GRID_WIDTH, 5)
+    b_image := rl.GenImageCellular(GRID_LEN, GRID_WIDTH, 5)
+    a_image := rl.GenImageCellular(GRID_LEN, GRID_WIDTH, 5)
 
     image := rl.ImageCopy(a_image)
 
@@ -43,47 +52,171 @@ init_ground_grid :: proc() -> Ground_Grid {
     rl.UnloadImage(b_image)
     rl.UnloadImage(a_image)
 
-    return Ground_Grid{image, pixels, int(image.width), 0}
+    cubemesh := rl.GenMeshCube(f32(TILE_SIZE), f32(TILE_SIZE), f32(TILE_SIZE))
+    cubemodel := rl.LoadModelFromMesh(cubemesh)
+
+    // Load shaders for instanced rendering
+    shader := rl.LoadShader("assets/terrain.vs", "assets/terrain.fs") 
+    
+    // Create material and set shader
+    material := rl.LoadMaterialDefault()
+    material.shader = shader
+    
+    // Generate perlin noise texture
+    perlin := rl.GenImagePerlinNoise(100, 100, 1, 1, 10)
+    material.maps[0].texture = rl.LoadTextureFromImage(perlin)
+
+    // Get shader locations for instance transforms
+    shader_matrix_loc := rl.GetShaderLocationAttrib(shader, "instanceTransform")
+    
+    // Enable vertex attribute for instance matrix
+    rl.SetShaderValue(shader, shader_matrix_loc, nil, .VEC4)
+    rl.SetShaderValueMatrix(shader, shader_matrix_loc, rl.Matrix(1))
+
+    {
+        perlin_big := rl.GenImagePerlinNoise(100, 100, 0, 0, 10)
+        terrain_mesh_big := rl.GenMeshHeightmap(perlin_big, rl.Vector3{100, 10, 100})
+        terrain_model_big = rl.LoadModelFromMesh(terrain_mesh_big)
+        
+        perlin_small := rl.GenImagePerlinNoise(100, 100, 100, 100, 1)
+        //perlin_small := rl.GenImagePerlinNoise(100, 100, 100*x, 100*y, 1)
+        terrain_mesh_small := rl.GenMeshHeightmap(perlin_small, rl.Vector3{10, 10, 10})
+        terrain_model_small =rl.LoadModelFromMesh(terrain_mesh_small)
+    
+        // Load and apply shader to terrain
+        shader2 := rl.LoadShader("assets/terrain.vs", "assets/terrain.fs")
+        defer rl.UnloadShader(shader2)
+        
+        // Generate noise texture
+        noise_image := rl.GenImagePerlinNoise(256, 256, 0, 0, 2.0)
+        noise_texture := rl.LoadTextureFromImage(noise_image)
+        defer rl.UnloadTexture(noise_texture)
+        rl.UnloadImage(noise_image)
+    
+        // Get shader uniform location
+        noise_loc := rl.GetShaderLocation(shader2, "noiseTexture")
+        
+        // Set the texture uniform
+        rl.SetShaderValue(shader2, noise_loc, rawptr(&noise_texture.id), .INT)
+        
+        terrain_model_big.materials[0].shader = shader2
+        terrain_model_small.materials[0].shader = shader2
+        rl.UnloadImage(perlin_big)
+        rl.UnloadImage(perlin_small)
+    }
+
+    // Create array to store instance transform matrices
+    matrices := make([dynamic]rl.Matrix, GRID_SIZE)
+
+    return Ground_Grid{image, pixels, int(image.width), 0, cubemesh, cubemodel, material, matrices}
 }
 
 deinit_ground_grid :: proc(ground_grid: ^Ground_Grid) {
     rl.UnloadImageColors(ground_grid.pixels)
     rl.UnloadImage(ground_grid.image)
+    delete(ground_grid.matrices)
 }
 
-draw_ground_grid :: proc() {
-    //red := rl.Color{255, 0, 0, 255}
-    //green := rl.Color{0, 255, 0, 255}
-    //blue := rl.Color{0, 0, 255, 255}
-    for i in 0..<g.ground_grid.image.width {
-        for j in 0..<g.ground_grid.image.height {
-            pixel := g.ground_grid.pixels[i*g.ground_grid.image.width + j]
+init_matrices :: proc() {
+    fmt.println("init_matrices")
+    for i in 0..<GRID_LEN {
+        for j in 0..<GRID_WIDTH {
+            //fmt.println("pixel", i, j)
+            pixel := g.ground_grid.pixels[i*GRID_WIDTH + j]
             h := pixel[g.ground_grid.current_color]
-            //r := pixel.r
-            //g := pixel.g
-            //b := pixel.b
+            //fmt.println("init_matrices", i, j, h)
+            if h > 0 {
+                g.ground_grid.matrices[i*GRID_WIDTH + j] = rl.Matrix{
+                    1, 0, 0, 0,
+                    0, 1, 0, 0,
+                    0, 0, 1, 0,
+                    f32(i*TILE_SIZE)+TILE_SIZE/2, f32(h)/(2*HEIGHT_SCALE), f32(j*TILE_SIZE)+TILE_SIZE/2, 1,
+                }
+                g.ground_grid.matrices[i*GRID_LEN + j][3][0] = f32(i*TILE_SIZE)+TILE_SIZE/2
+                g.ground_grid.matrices[i*GRID_LEN + j][3][1] = f32(h)/(2*HEIGHT_SCALE)
+                g.ground_grid.matrices[i*GRID_LEN + j][3][2] = f32(j*TILE_SIZE)+TILE_SIZE/2
+                /*
+                rl.DrawCubeV(
+                    rl.Vector3{f32(i*TILE_SIZE)+TILE_SIZE/2, f32(h)/(2*HEIGHT_SCALE), f32(j*TILE_SIZE)+TILE_SIZE/2}, 
+                    rl.Vector3{f32(TILE_SIZE), f32(h)/HEIGHT_SCALE, f32(TILE_SIZE)}, 
+                    rl.Color{h, h, h, 255})
+                */
+            }
+        }
+    }
+}
+
+
+draw_ground_grid_wire :: proc() {
+    for i in 0..<GRID_LEN {
+        for j in 0..<GRID_WIDTH {
+            //fmt.println("pixel", i, j)
+            pixel := g.ground_grid.pixels[i*GRID_WIDTH + j]
+            h := pixel[g.ground_grid.current_color]
+            //fmt.println("init_matrices", i, j, h)
             if h > 0 {
                 rl.DrawCubeV(
                     rl.Vector3{f32(i*TILE_SIZE)+TILE_SIZE/2, f32(h)/(2*HEIGHT_SCALE), f32(j*TILE_SIZE)+TILE_SIZE/2}, 
                     rl.Vector3{f32(TILE_SIZE), f32(h)/HEIGHT_SCALE, f32(TILE_SIZE)}, 
                     rl.Color{h, h, h, 255})
+                rl.DrawCubeWiresV(
+                    rl.Vector3{f32(i*TILE_SIZE)+TILE_SIZE/2, f32(h)/(2*HEIGHT_SCALE), f32(j*TILE_SIZE)+TILE_SIZE/2}, 
+                    rl.Vector3{f32(TILE_SIZE), f32(h)/HEIGHT_SCALE, f32(TILE_SIZE)}, 
+                    rl.Color{10, 10, 10, 255})
             }
-            /*
-            rl.DrawCubeWiresV(
-                rl.Vector3{f32(i*TILE_SIZE)+TILE_SIZE/2, f32(r)/(2*HEIGHT_SCALE), f32(j*TILE_SIZE)+TILE_SIZE/2}, 
-                rl.Vector3{f32(TILE_SIZE), f32(r)/HEIGHT_SCALE, f32(TILE_SIZE)}, 
-                red)
-            rl.DrawCubeWiresV(
-                rl.Vector3{f32(i*TILE_SIZE)+TILE_SIZE/2, f32(g)/(2*HEIGHT_SCALE), f32(j*TILE_SIZE)+TILE_SIZE/2}, 
-                rl.Vector3{f32(TILE_SIZE), f32(g)/HEIGHT_SCALE, f32(TILE_SIZE)}, 
-                green)
-            rl.DrawCubeWiresV(
-                rl.Vector3{f32(i*TILE_SIZE)+TILE_SIZE/2, f32(b)/(2*HEIGHT_SCALE), f32(j*TILE_SIZE)+TILE_SIZE/2}, 
-                rl.Vector3{f32(TILE_SIZE), f32(b)/HEIGHT_SCALE, f32(TILE_SIZE)}, 
-                blue)
-            */
         }
     }
+
+}
+
+draw_ground_grid :: proc() {
+    rl.DrawModel(terrain_model_big, rl.Vector3{ -10, 10, -10 }, 1.0, rl.GREEN)
+    rl.DrawModel(terrain_model_small, rl.Vector3{ 10, 10, 10 }, 1.0, rl.GREEN)
+    // Get shader location for MVP
+    shader_mvp_loc := rl.GetShaderLocation(g.ground_grid.material.shader, "mvp")
+    
+    // Get current camera matrices
+    camera := get_fling_camera()
+    view_matrix := rl.GetCameraMatrix(camera)
+    //projection_matrix := rl.GetProjectionMatrix()
+    
+    // Calculate view-projection matrix (will be combined with model matrix in shader)
+    //view_proj := rl.MatrixMultiply(view_matrix, projection_matrix)
+    
+    // Set view-projection matrix uniform
+    rl.SetShaderValueMatrix(g.ground_grid.material.shader, shader_mvp_loc, view_matrix)
+    
+    // Update matrices array if needed
+    for i in 0..<GRID_LEN {
+        for j in 0..<GRID_WIDTH {
+            pixel := g.ground_grid.pixels[i*GRID_LEN + j]
+            h := pixel[g.ground_grid.current_color]
+            
+            if h > 0 {
+                g.ground_grid.matrices[i*GRID_LEN + j] = rl.Matrix{
+                    1, 0, 0, 0,
+                    0, 1, 0, 0,
+                    0, 0, 1, 0,
+                    f32(i*TILE_SIZE)+TILE_SIZE/2, f32(h)/(2*HEIGHT_SCALE), f32(j*TILE_SIZE)+TILE_SIZE/2, 1,
+                }
+            } else {
+                // For empty spaces, move them far below (or use a scale of 0)
+                g.ground_grid.matrices[i*GRID_LEN + j] = rl.Matrix{
+                    1, 0, 0, 0,
+                    0, 1, 0, 0,
+                    0, 0, 1, 0,
+                    f32(i*TILE_SIZE)+TILE_SIZE/2, -1000, f32(j*TILE_SIZE)+TILE_SIZE/2, 1,
+                }
+            }
+        }
+    }
+    
+    // Draw all cubes in a single instanced call
+    rl.DrawMeshInstanced(
+        g.ground_grid.cubemesh, 
+        g.ground_grid.material, 
+        raw_data(g.ground_grid.matrices), 
+        i32(len(g.ground_grid.matrices)))
 }
 
 check_map_toggle :: proc(color: box_color) -> bool {

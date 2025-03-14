@@ -106,9 +106,10 @@ solve_spring :: proc(spring: ^Spring, dts: f32) {
     current_length := linalg.length(delta_pos)
     
     // Calculate constraint value (how far from desired length)
-    c := current_length - (spring.rest_length - 
-        (g.input_intent.trigger_left * spring.rest_length / 4) - 
-        (g.input_intent.trigger_right * spring.rest_length / 4))
+    c := current_length - (spring.rest_length - (g.fling.crouch_amount * spring.rest_length/2))
+
+        //(g.input_intent.trigger_left * spring.rest_length / 4) - 
+        //(g.input_intent.trigger_right * spring.rest_length / 4)
     
     // Calculate inverse masses
     w0 := point_a.mass > 0.0 ? 1.0 / point_a.mass : 0.0
@@ -147,6 +148,10 @@ solve_ground :: proc(point: ^Point, dts: f32) {
         point.position.y = 0
     }
 
+    if point.position.y < 50 {
+        //reset_player_position(point)
+    }
+
     //collision_point, normal := new_grid_collision(point)
     //point.position = collision_point
     //point.velocity = point.velocity * 0.95
@@ -157,8 +162,12 @@ solve_box_collision :: proc(point: ^Point) {
     if math.is_nan(point.position.x) || math.is_nan(point.position.y) || math.is_nan(point.position.z) {
         fmt.println("NaN cant solve_box_collision", point.position, point.id)
         return
-    } else if point.position.x < 0 || point.position.z < 0 {
-        //fmt.println("outside grid cant solve_box_collision", point.position, point.id)
+    } else if point.position.x < 0 ||  
+              point.position.z < 0 || 
+              point.position.x > GRID_LEN*TILE_SIZE || 
+              point.position.z > GRID_WIDTH*TILE_SIZE {
+        point.position.x = clamp(point.position.x, 0, GRID_LEN*TILE_SIZE)
+        point.position.z = clamp(point.position.z, 0, GRID_WIDTH*TILE_SIZE)
         return
     }
     center, size, height := get_box_at_position(point.position)
@@ -179,8 +188,12 @@ solve_box_collision :: proc(point: ^Point) {
     }
     // if point is just above the box, move it up
     if point.position.y > height - 0.2 {
-        fmt.println("top hit")
+        //fmt.println("top hit")
         point.position.y = height
+        // slide friction if really crouched
+        friction :f32 = g.fling.crouch_amount
+        assert(friction <= 1 && friction >= 0)
+        point.position += (point.prev_pos - point.position) * friction
         return
     }
     if point.position.x > center.x + size.x/2 - 0.2 {

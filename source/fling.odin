@@ -6,12 +6,20 @@ import "core:math"
 import "core:math/linalg"
 Fling :: struct {
     Center: ^Point,
-
+    character_type: Character_Type,
     rotation: rl.Vector3,
     frst_pos: rl.Vector3,
     thrd_pos: rl.Vector3,
     ideal_camera_pos: rl.Vector3,
     look_target: rl.Vector3,
+    crouch_amount: f32,
+}
+Character_Type :: enum {
+    Tetrahedron,
+    Cube,
+    Octahedron,
+    Dodecahedron,
+    Icosahedron,
 }
 
 
@@ -40,12 +48,18 @@ create_fling :: proc(pbd_world: ^PBD_World) -> Fling {
     fmt.println("fling")
 
     fling := Fling{}
-	center := pbd_create_point(pbd_world, rl.Vector3{100, 100, 100})
-    //create_tetrahedron(pbd_world, center)
-    //create_cube(pbd_world, center)
-    //create_octahedron(pbd_world, center)
-    //create_dodecahedron(pbd_world, center)
-    create_icosahedron(pbd_world, center)
+	center := pbd_create_point(pbd_world, rl.Vector3{10, 100, 10})
+    if g.fling.character_type == .Tetrahedron {
+        create_tetrahedron(pbd_world, center)
+    } else if g.fling.character_type == .Cube {
+        create_cube(pbd_world, center)
+    } else if g.fling.character_type == .Octahedron {
+        create_octahedron(pbd_world, center)
+    } else if g.fling.character_type == .Dodecahedron {
+        create_dodecahedron(pbd_world, center)
+    } else if g.fling.character_type == .Icosahedron {
+        create_icosahedron(pbd_world, center)
+    }
 
 	fling.Center = center
 
@@ -91,10 +105,28 @@ simulate_fling :: proc(fling: ^Fling) {
         math.cos(fling.rotation.y + math.PI/2),
     }
 
+    // Calculate constraint value (how far from desired length)
+    g.fling.crouch_amount = ((g.input_intent.trigger_left + 1) + (g.input_intent.trigger_right + 1)) / 4
+
+	// distance to ground
+	center := g.fling.Center.position
+	_, _, height := get_box_at_position(center)
+	height_from_ground := center.y - height
+
+    ground_mod :f32= 5 if height_from_ground < 4 else 2
+
     // Combine forward/back and right/left movement
     move_direction := forward * -move_z + right * -move_x
-    move_velocity := move_direction * move_speed
+    move_velocity := move_direction * move_speed * ground_mod
     fling.Center.velocity += move_velocity
+
+    move_fuel_cost := linalg.length(move_velocity) * rl.GetFrameTime() * height_from_ground / ground_mod
+    //fmt.println("move_fuel_cost", move_fuel_cost)
+    g.fuel -= move_fuel_cost
+
+    if g.fuel < 0 {
+        g.fuel = 0
+    }
 }
 
 draw_fling :: proc() {
@@ -408,18 +440,18 @@ create_icosahedron :: proc(pbd_world: ^PBD_World, center: ^Point) {
         pbd_create_spring(pbd_world, top_points_idx[i], bottom_points_idx[(i+1)%5], radius)
     }
     
-    // Connect top and bottom points to center
+    //// Connect top and bottom points to center
     pbd_create_spring(pbd_world, point_idx(top_point_idx), center.id, radius*cent)
     pbd_create_spring(pbd_world, point_idx(bottom_point_idx), center.id, radius*cent)
 
 
     // cross struts
     pbd_create_spring(pbd_world, point_idx(top_point_idx), point_idx(bottom_point_idx), radius*cent*2)
-    pbd_create_spring(pbd_world, point_idx(top_points_idx[0]), point_idx(bottom_points_idx[2]), radius*cent*2)
-    pbd_create_spring(pbd_world, point_idx(top_points_idx[1]), point_idx(bottom_points_idx[3]), radius*cent*2)
-    pbd_create_spring(pbd_world, point_idx(top_points_idx[2]), point_idx(bottom_points_idx[4]), radius*cent*2)
-    pbd_create_spring(pbd_world, point_idx(top_points_idx[3]), point_idx(bottom_points_idx[0]), radius*cent*2)
-    pbd_create_spring(pbd_world, point_idx(top_points_idx[4]), point_idx(bottom_points_idx[1]), radius*cent*2)
+    pbd_create_spring(pbd_world, point_idx(top_points_idx[0]), point_idx(bottom_points_idx[3]), radius*cent*2)
+    pbd_create_spring(pbd_world, point_idx(top_points_idx[1]), point_idx(bottom_points_idx[4]), radius*cent*2)
+    pbd_create_spring(pbd_world, point_idx(top_points_idx[2]), point_idx(bottom_points_idx[0]), radius*cent*2)
+    pbd_create_spring(pbd_world, point_idx(top_points_idx[3]), point_idx(bottom_points_idx[1]), radius*cent*2)
+    pbd_create_spring(pbd_world, point_idx(top_points_idx[4]), point_idx(bottom_points_idx[2]), radius*cent*2)
 
 
 }
