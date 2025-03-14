@@ -1,6 +1,7 @@
 package game
 
 import "core:math/linalg"
+import "core:math"
 import rl "vendor:raylib"
 import "core:fmt"
 Point :: struct {
@@ -42,9 +43,10 @@ pbd_simulate :: proc(delta_time: f32) {
         // constraints
         for i in 0..<len(g.pbd_world.points) {
             if i > 420 {
-                fmt.println("points[%d]", i, g.pbd_world.points[i])
+                //fmt.println("points[%d]", i, g.pbd_world.points[i])
             }
             solve_ground(&g.pbd_world.points[i], dts)
+            solve_box_collision(&g.pbd_world.points[i])
         }
         for i in 0..<len(g.pbd_world.springs) { //solve springs
             solve_spring(&g.pbd_world.springs[i], dts)
@@ -145,10 +147,58 @@ solve_ground :: proc(point: ^Point, dts: f32) {
         point.position.y = 0
     }
 
-    collision_point, normal := grid_collision(point)
-    point.position = collision_point
-    point.velocity = point.velocity * 0.95
-    point.velocity = point.velocity + normal * 0.1
+    //collision_point, normal := new_grid_collision(point)
+    //point.position = collision_point
+    //point.velocity = point.velocity * 0.95
+    //point.velocity = point.velocity + normal * 0.1
+}
+
+solve_box_collision :: proc(point: ^Point) {
+    if math.is_nan(point.position.x) || math.is_nan(point.position.y) || math.is_nan(point.position.z) {
+        fmt.println("NaN cant solve_box_collision", point.position, point.id)
+        return
+    } else if point.position.x < 0 || point.position.z < 0 {
+        //fmt.println("outside grid cant solve_box_collision", point.position, point.id)
+        return
+    }
+    center, size, height := get_box_at_position(point.position)
+
+    // Early exits
+    if point.position.y > height || point.position.y < 0 {
+        return // Above or below box
+    }
+    if point.position.x > center.x + size.x/2 || point.position.x < center.x - size.x/2 {
+        fmt.println("outside box", point.position, center, size, height)
+        fmt.println("point.position.x", point.position.x, center.x + size.x/2, center.x - size.x/2)
+        assert(false)
+        return // Outside box
+    }
+    if point.position.z > center.z + size.z/2 || point.position.z < center.z - size.z/2 {
+        assert(false)
+        return // Outside box
+    }
+    // if point is just above the box, move it up
+    if point.position.y > height - 0.2 {
+        fmt.println("top hit")
+        point.position.y = height
+        return
+    }
+    if point.position.x > center.x + size.x/2 - 0.2 {
+        point.position.x = center.x + size.x/2 + 0.03
+        return
+    }
+    if point.position.x < center.x - size.x/2 + 0.2 {
+        point.position.x = center.x - size.x/2 - 0.03
+        return
+    }
+    if point.position.z > center.z + size.z/2 - 0.2 {
+        point.position.z = center.z + size.z/2 + 0.03
+        return
+    }
+    if point.position.z < center.z - size.z/2 + 0.2 {
+        point.position.z = center.z - size.z/2 - 0.03
+        return
+    }
 }
 
 pbd_init :: proc() -> ^PBD_World {
@@ -275,7 +325,7 @@ pbd_create_box :: proc(pbd_world: ^PBD_World, position: rl.Vector3, size: rl.Vec
 
 pbd_draw_points :: proc(points: [dynamic]Point) {
     for i in 0..<len(points) {
-        rl.DrawSphere(points[i].position, 1, rl.ORANGE)
+        rl.DrawSphere(points[i].position, 0.3, rl.ORANGE)
     }
 }
 

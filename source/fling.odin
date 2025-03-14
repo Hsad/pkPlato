@@ -41,8 +41,11 @@ create_fling :: proc(pbd_world: ^PBD_World) -> Fling {
 
     fling := Fling{}
 	center := pbd_create_point(pbd_world, rl.Vector3{100, 100, 100})
-    //create_ball(pbd_world, center)
-    create_tetrahedron(pbd_world, center)
+    //create_tetrahedron(pbd_world, center)
+    //create_cube(pbd_world, center)
+    //create_octahedron(pbd_world, center)
+    //create_dodecahedron(pbd_world, center)
+    create_icosahedron(pbd_world, center)
 
 	fling.Center = center
 
@@ -104,7 +107,7 @@ draw_fling :: proc() {
 
 
 create_tetrahedron :: proc(pbd_world: ^PBD_World, center: ^Point) {
-    radius :f32= 20
+    radius :f32= 3
     cent :f32= math.sqrt_f32(6)/4
     
     // Create vertices of a regular tetrahedron
@@ -130,9 +133,219 @@ create_tetrahedron :: proc(pbd_world: ^PBD_World, center: ^Point) {
 
 }
 
-create_ball :: proc(pbd_world: ^PBD_World, center: ^Point) {
+create_cube :: proc(pbd_world: ^PBD_World, center: ^Point) {
+    /// create a cube
+    radius :f32= 3.0
+    cent :f32= math.sqrt_f32(3)/2
+    // create 8 points
+    p0 := pbd_create_point(pbd_world, center.position + rl.Vector3{radius, radius, radius})
+    p1 := pbd_create_point(pbd_world, center.position + rl.Vector3{radius, radius, -radius})
+    p2 := pbd_create_point(pbd_world, center.position + rl.Vector3{radius, -radius, radius})
+    p3 := pbd_create_point(pbd_world, center.position + rl.Vector3{radius, -radius, -radius})
+    p4 := pbd_create_point(pbd_world, center.position + rl.Vector3{-radius, radius, radius})
+    p5 := pbd_create_point(pbd_world, center.position + rl.Vector3{-radius, radius, -radius})
+    p6 := pbd_create_point(pbd_world, center.position + rl.Vector3{-radius, -radius, radius})
+    p7 := pbd_create_point(pbd_world, center.position + rl.Vector3{-radius, -radius, -radius})
+    
+    // create 12 springs
+    pbd_create_spring(pbd_world, p0.id, p1.id, radius)
+    pbd_create_spring(pbd_world, p0.id, p2.id, radius)
+    pbd_create_spring(pbd_world, p1.id, p3.id, radius)
+    pbd_create_spring(pbd_world, p2.id, p3.id, radius)
+
+
+    pbd_create_spring(pbd_world, p4.id, p5.id, radius)
+    pbd_create_spring(pbd_world, p4.id, p6.id, radius)
+    pbd_create_spring(pbd_world, p5.id, p7.id, radius)
+    pbd_create_spring(pbd_world, p6.id, p7.id, radius)
+
+    pbd_create_spring(pbd_world, p0.id, p7.id, radius)
+    pbd_create_spring(pbd_world, p1.id, p6.id, radius)
+    pbd_create_spring(pbd_world, p2.id, p5.id, radius)
+    pbd_create_spring(pbd_world, p3.id, p4.id, radius)
+
+    // 4 cross springs
+    pbd_create_spring(pbd_world, p0.id, p4.id, radius*cent*2)
+    pbd_create_spring(pbd_world, p1.id, p5.id, radius*cent*2)
+    pbd_create_spring(pbd_world, p2.id, p6.id, radius*cent*2)
+    pbd_create_spring(pbd_world, p3.id, p7.id, radius*cent*2)
+    // create 8 springs to center
+    pbd_create_spring(pbd_world, p0.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p1.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p2.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p3.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p4.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p5.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p6.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p7.id, center.id, radius*cent)
+}
+
+create_octahedron :: proc(pbd_world: ^PBD_World, center: ^Point) {
+    /// create an octahedron
+    radius :f32= 3.0
+    cent :f32= math.sqrt_f32(2)/2
+    
+    // Create vertices of a regular octahedron
+    p0 := pbd_create_point(pbd_world, center.position + rl.Vector3{radius, 0, 0})
+    p1 := pbd_create_point(pbd_world, center.position + rl.Vector3{0, radius, 0})
+    p2 := pbd_create_point(pbd_world, center.position + rl.Vector3{0, 0, radius})
+    p3 := pbd_create_point(pbd_world, center.position + rl.Vector3{-radius, 0, 0})
+    p4 := pbd_create_point(pbd_world, center.position + rl.Vector3{0, -radius, 0})
+    p5 := pbd_create_point(pbd_world, center.position + rl.Vector3{0, 0, -radius})
+
+    // create 12 springs
+    pbd_create_spring(pbd_world, p0.id, p1.id, radius)
+    pbd_create_spring(pbd_world, p0.id, p2.id, radius)
+    pbd_create_spring(pbd_world, p0.id, p3.id, radius)
+    pbd_create_spring(pbd_world, p0.id, p4.id, radius)
+
+    pbd_create_spring(pbd_world, p1.id, p2.id, radius)
+    pbd_create_spring(pbd_world, p2.id, p3.id, radius)
+    pbd_create_spring(pbd_world, p3.id, p4.id, radius)
+    pbd_create_spring(pbd_world, p4.id, p1.id, radius)
+
+    pbd_create_spring(pbd_world, p5.id, p1.id, radius)
+    pbd_create_spring(pbd_world, p5.id, p2.id, radius)
+    pbd_create_spring(pbd_world, p5.id, p3.id, radius)
+    pbd_create_spring(pbd_world, p5.id, p4.id, radius)
+    
+    pbd_create_spring(pbd_world, p0.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p1.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p2.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p3.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p4.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p5.id, center.id, radius*cent)
+
+    pbd_create_spring(pbd_world, p0.id, p5.id, radius*cent*2)
+    pbd_create_spring(pbd_world, p1.id, p3.id, radius*cent*2)
+    pbd_create_spring(pbd_world, p2.id, p4.id, radius*cent*2)
+}
+
+
+create_dodecahedron :: proc(pbd_world: ^PBD_World, center: ^Point) {
+    /// create a dodecahedron
+    radius :f32= 3.0
+    cent :f32= math.sqrt_f32(3*(5+math.sqrt_f32(5)))/4
+
+    off1 :f32= 0.382 * radius
+    off2 :f32= 0.6182 * radius
+    
+    // Create vertices of a regular dodecahedron
+    // The center point is at the barycenter (centroid)
+    // 8 points, 
+    p0 := pbd_create_point(pbd_world, center.position + rl.Vector3{off1, radius, 0})
+    p1 := pbd_create_point(pbd_world, center.position + rl.Vector3{-off1, radius, 0})
+    p2 := pbd_create_point(pbd_world, center.position + rl.Vector3{off1, -radius, 0})
+    p3 := pbd_create_point(pbd_world, center.position + rl.Vector3{-off1, -radius, 0})
+
+    p4 := pbd_create_point(pbd_world, center.position + rl.Vector3{radius, 0, off1})
+    p5 := pbd_create_point(pbd_world, center.position + rl.Vector3{radius, 0, -off1})
+    p6 := pbd_create_point(pbd_world, center.position + rl.Vector3{-radius, 0, off1})
+    p7 := pbd_create_point(pbd_world, center.position + rl.Vector3{-radius, 0, -off1})
+
+    p8 := pbd_create_point(pbd_world, center.position + rl.Vector3{0, off1, radius})
+    p9 := pbd_create_point(pbd_world, center.position + rl.Vector3{0, -off1, radius})
+    p10 := pbd_create_point(pbd_world, center.position + rl.Vector3{0, off1, -radius})
+    p11 := pbd_create_point(pbd_world, center.position + rl.Vector3{0, -off1, -radius})
+    //create cube points with offset of off2
+    p12 := pbd_create_point(pbd_world, center.position + rl.Vector3{off2, off2, off2})
+    p13 := pbd_create_point(pbd_world, center.position + rl.Vector3{off2, off2, -off2})
+    p14 := pbd_create_point(pbd_world, center.position + rl.Vector3{off2, -off2, off2})
+    p15 := pbd_create_point(pbd_world, center.position + rl.Vector3{off2, -off2, -off2})
+
+    p16 := pbd_create_point(pbd_world, center.position + rl.Vector3{-off2, off2, off2})
+    p17 := pbd_create_point(pbd_world, center.position + rl.Vector3{-off2, off2, -off2})
+    p18 := pbd_create_point(pbd_world, center.position + rl.Vector3{-off2, -off2, off2})
+    p19 := pbd_create_point(pbd_world, center.position + rl.Vector3{-off2, -off2, -off2})
+
+    // create 30 springs
+    // Othogonal flat edges
+    pbd_create_spring(pbd_world, p0.id, p1.id, radius)
+    pbd_create_spring(pbd_world, p2.id, p3.id, radius)
+    pbd_create_spring(pbd_world, p4.id, p5.id, radius)
+    pbd_create_spring(pbd_world, p6.id, p7.id, radius)
+    pbd_create_spring(pbd_world, p8.id, p9.id, radius)
+    pbd_create_spring(pbd_world, p10.id, p11.id, radius)
+    //
+    // Connect cube points to closest orthogonal points
+    // p12 (+off2, +off2, +off2) connects to p0 (+off1,+r,0), p4 (+r,0,+off1), p8 (0,+off1,+r)
+    pbd_create_spring(pbd_world, p12.id, p0.id, radius)
+    pbd_create_spring(pbd_world, p12.id, p4.id, radius) 
+    pbd_create_spring(pbd_world, p12.id, p8.id, radius)
+
+    // p13 (+off2, +off2, -off2) connects to p0 (+off1,+r,0), p5 (+r,0,-off1), p10 (0,+off1,-r)
+    pbd_create_spring(pbd_world, p13.id, p0.id, radius)
+    pbd_create_spring(pbd_world, p13.id, p5.id, radius)
+    pbd_create_spring(pbd_world, p13.id, p10.id, radius)
+
+    // p14 (+off2, -off2, +off2) connects to p2 (+off1,-r,0), p4 (+r,0,+off1), p9 (0,-off1,+r)
+    pbd_create_spring(pbd_world, p14.id, p2.id, radius)
+    pbd_create_spring(pbd_world, p14.id, p4.id, radius)
+    pbd_create_spring(pbd_world, p14.id, p9.id, radius)
+
+    // p15 (+off2, -off2, -off2) connects to p2 (+off1,-r,0), p5 (+r,0,-off1), p11 (0,-off1,-r)
+    pbd_create_spring(pbd_world, p15.id, p2.id, radius)
+    pbd_create_spring(pbd_world, p15.id, p5.id, radius)
+    pbd_create_spring(pbd_world, p15.id, p11.id, radius)
+
+    // p16 (-off2, +off2, +off2) connects to p1 (-off1,+r,0), p6 (-r,0,+off1), p8 (0,+off1,+r)
+    pbd_create_spring(pbd_world, p16.id, p1.id, radius)
+    pbd_create_spring(pbd_world, p16.id, p6.id, radius)
+    pbd_create_spring(pbd_world, p16.id, p8.id, radius)
+
+    // p17 (-off2, +off2, -off2) connects to p1 (-off1,+r,0), p7 (-r,0,-off1), p10 (0,+off1,-r)
+    pbd_create_spring(pbd_world, p17.id, p1.id, radius)
+    pbd_create_spring(pbd_world, p17.id, p7.id, radius)
+    pbd_create_spring(pbd_world, p17.id, p10.id, radius)
+
+    // p18 (-off2, -off2, +off2) connects to p3 (-off1,-r,0), p6 (-r,0,+off1), p9 (0,-off1,+r)
+    pbd_create_spring(pbd_world, p18.id, p3.id, radius)
+    pbd_create_spring(pbd_world, p18.id, p6.id, radius)
+    pbd_create_spring(pbd_world, p18.id, p9.id, radius)
+
+    // p19 (-off2, -off2, -off2) connects to p3 (-off1,-r,0), p7 (-r,0,-off1), p11 (0,-off1,-r)
+    pbd_create_spring(pbd_world, p19.id, p3.id, radius)
+    pbd_create_spring(pbd_world, p19.id, p7.id, radius)
+    pbd_create_spring(pbd_world, p19.id, p11.id, radius)
+
+
+    // connect every point to center
+    pbd_create_spring(pbd_world, p0.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p1.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p2.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p3.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p4.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p5.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p6.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p7.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p8.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p9.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p10.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p11.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p12.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p13.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p14.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p15.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p16.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p17.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p18.id, center.id, radius*cent)
+    pbd_create_spring(pbd_world, p19.id, center.id, radius*cent)
+
+
+    // cross bars
+    pbd_create_spring(pbd_world, p0.id, p3.id, radius*cent*2)
+    pbd_create_spring(pbd_world, p1.id, p2.id, radius*cent*2)
+    pbd_create_spring(pbd_world, p4.id, p7.id, radius*cent*2)
+    pbd_create_spring(pbd_world, p5.id, p6.id, radius*cent*2)
+    pbd_create_spring(pbd_world, p8.id, p11.id, radius*cent*2)
+    pbd_create_spring(pbd_world, p9.id, p10.id, radius*cent*2)
+    
+}
+
+
+create_icosahedron :: proc(pbd_world: ^PBD_World, center: ^Point) {
     /// create an icosahedron
-    radius :f32= 20.0
+    radius :f32= 3.0
     
     // First create all points with proper initial positions
     // Top point
@@ -198,6 +411,17 @@ create_ball :: proc(pbd_world: ^PBD_World, center: ^Point) {
     // Connect top and bottom points to center
     pbd_create_spring(pbd_world, point_idx(top_point_idx), center.id, radius*cent)
     pbd_create_spring(pbd_world, point_idx(bottom_point_idx), center.id, radius*cent)
+
+
+    // cross struts
+    pbd_create_spring(pbd_world, point_idx(top_point_idx), point_idx(bottom_point_idx), radius*cent*2)
+    pbd_create_spring(pbd_world, point_idx(top_points_idx[0]), point_idx(bottom_points_idx[2]), radius*cent*2)
+    pbd_create_spring(pbd_world, point_idx(top_points_idx[1]), point_idx(bottom_points_idx[3]), radius*cent*2)
+    pbd_create_spring(pbd_world, point_idx(top_points_idx[2]), point_idx(bottom_points_idx[4]), radius*cent*2)
+    pbd_create_spring(pbd_world, point_idx(top_points_idx[3]), point_idx(bottom_points_idx[0]), radius*cent*2)
+    pbd_create_spring(pbd_world, point_idx(top_points_idx[4]), point_idx(bottom_points_idx[1]), radius*cent*2)
+
+
 }
 
 calc_fling_1st_person :: proc() {

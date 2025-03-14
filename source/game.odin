@@ -206,6 +206,11 @@ draw :: proc() {
 	//rl.DrawText(fmt.ctprintf("some_number: %v\nplayer_pos: %v", g.some_number, g.player_pos), 5, 5, 8, rl.WHITE)
 	// frame time and frame rate
 	rl.DrawText(fmt.ctprintf("ft: %v\nfps: %v", rl.GetFrameTime(), rl.GetFPS()), 5, 5, 8, rl.WHITE)
+	// distance to ground
+	center := g.fling.Center.position
+	_, _, height := get_box_at_position(center)
+	dist := center.y - height
+	rl.DrawText(fmt.ctprintf("dist: %v", dist), 5, 45, 8, rl.WHITE)
 
 	rl.EndMode2D()
 
