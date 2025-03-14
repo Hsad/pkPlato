@@ -190,10 +190,10 @@ solve_box_collision :: proc(point: ^Point) {
     if point.position.y > height - 0.2 {
         //fmt.println("top hit")
         point.position.y = height
-        // slide friction if really crouched
-        friction :f32 = g.fling.crouch_amount
-        assert(friction <= 1 && friction >= 0)
-        point.position += (point.prev_pos - point.position) * friction
+        //// slide friction if really crouched
+        //friction :f32 = g.fling.crouch_amount
+        //assert(friction <= 1 && friction >= 0)
+        //point.position += (point.prev_pos - point.position) * (friction * 0.5)
         return
     }
     if point.position.x > center.x + size.x/2 - 0.2 {

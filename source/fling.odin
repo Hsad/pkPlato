@@ -51,6 +51,7 @@ create_fling :: proc(pbd_world: ^PBD_World) -> Fling {
 	center := pbd_create_point(pbd_world, rl.Vector3{10, 100, 10})
     if g.fling.character_type == .Tetrahedron {
         create_tetrahedron(pbd_world, center)
+        center.mass = 0.5
     } else if g.fling.character_type == .Cube {
         create_cube(pbd_world, center)
     } else if g.fling.character_type == .Octahedron {
@@ -113,7 +114,7 @@ simulate_fling :: proc(fling: ^Fling) {
 	_, _, height := get_box_at_position(center)
 	height_from_ground := center.y - height
 
-    ground_mod :f32= 5 if height_from_ground < 4 else 2
+    ground_mod :f32= 4 if height_from_ground < 4 else 1.5
 
     // Combine forward/back and right/left movement
     move_direction := forward * -move_z + right * -move_x
@@ -126,6 +127,36 @@ simulate_fling :: proc(fling: ^Fling) {
 
     if g.fuel < 0 {
         g.fuel = 0
+    }
+
+
+    if g.input_intent.button_y && !g.input_previous.button_y {
+        // switch to new solid
+        center := pbd_create_point(g.pbd_world, g.fling.Center.position)
+        if g.fling.character_type == .Tetrahedron {
+            fmt.println("cube")
+            create_cube(g.pbd_world, center)
+            g.fling.character_type = .Cube
+        } else if g.fling.character_type == .Cube {
+            fmt.println("octahedron")
+            create_octahedron(g.pbd_world, center)
+            g.fling.character_type = .Octahedron
+        } else if g.fling.character_type == .Octahedron {
+            fmt.println("dodecahedron")
+            create_dodecahedron(g.pbd_world, center)
+            g.fling.character_type = .Dodecahedron
+        } else if g.fling.character_type == .Dodecahedron {
+            fmt.println("icosahedron")
+            create_icosahedron(g.pbd_world, center)
+            g.fling.character_type = .Icosahedron
+        } else if g.fling.character_type == .Icosahedron {
+            fmt.println("tetrahedron")
+            create_tetrahedron(g.pbd_world, center)
+            center.mass = 0.5
+            g.fling.character_type = .Tetrahedron
+        }
+        g.fling.Center = center
+
     }
 }
 
