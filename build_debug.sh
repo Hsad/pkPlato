@@ -1,4 +1,4 @@
-#!/bin/bash -eu
+#!/usr/bin/env bash
 
 # This creates a build that is similar to a release build, but it is debuggable.
 # There is no hot reloading and no separate game library.

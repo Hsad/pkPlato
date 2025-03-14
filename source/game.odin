@@ -220,7 +220,6 @@ draw :: proc() {
 	//debug
 	//rl.DrawSphere(g.debug.nearest_point, 0.3, rl.RED)
 
-	draw_ground_grid()
 	draw_ground_grid_wire()
 
 	//draw_player()

@@ -1,10 +1,13 @@
 { pkgs ? import <nixos> {} }:
-
+let
+  # Import the unstable channel
+  unstable = import (fetchTarball "https://github.com/NixOS/nixpkgs/archive/nixos-unstable.tar.gz") {};
+in
 pkgs.mkShell
 {
   nativeBuildInputs = with pkgs; [
     gcc
-    odin
+    unstable.odin
     raylib
     glfw
     xorg.libX11
@@ -18,6 +21,7 @@ pkgs.mkShell
     git
     bash
     watchexec
+    emscripten
   ];
 
   shellHook = ''

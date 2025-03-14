@@ -243,10 +243,10 @@ pbd_init_player :: proc(pbd_world: ^PBD_World) {
 
 pbd_create_point :: proc(pbd_world: ^PBD_World, position: rl.Vector3) -> ^Point {
     len := len(pbd_world.points)
-    fmt.println("pbd_create_point", position, len)
+    //fmt.println("pbd_create_point", position, len)
     p := Point{position, position, {0, 0, 0}, {0, 0, 0}, 1.0, point_idx(len)}
     append(&pbd_world.points, p)
-    fmt.println("pbd_create_point", p)
+    //fmt.println("pbd_create_point", p)
     return &pbd_world.points[len]
 }
 
