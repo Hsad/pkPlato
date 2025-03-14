@@ -40,6 +40,7 @@ Debug_data :: struct {
 Game_Memory :: struct {
 	run: bool,
 	skip: bool,
+	pause: bool,
 	debug: Debug_data,
 
 	input_intent: Input_Intent,
@@ -117,7 +118,7 @@ game_init :: proc() {
 	g^ = Game_Memory {
 		run = true,
 		skip = true,
-
+		pause = false,
 		fuel = 1000,
 
 		// You can put textures, sounds and music in the `assets` folder. Those
@@ -149,11 +150,11 @@ update :: proc() {
 	//controller_input() // build input state
 	get_input_intent()
 
-	player_controller_presim() // update player position
+	//player_controller_presim() // update player position
 	//g.pbd_world.points[0].velocity = g.player.vel
 
 	simulate_fling(&g.fling)
-	if !g.skip {
+	if !g.skip && !g.pause {
 		pbd_simulate(rl.GetFrameTime()) // simulate physics
 	}
 	g.skip = false
@@ -166,13 +167,13 @@ update :: proc() {
 	//g.player.pos = g.pbd_world.points[0].position
 	//g.player.vel = g.pbd_world.points[0].velocity
 
-	player_controller_postsim()
+	//player_controller_postsim()
 
 	calc_fling_3rd_person()
 	calc_fling_1st_person()
 
-	calc_camera_3rd_person()
-	calc_camera_1st_person()
+	//calc_camera_3rd_person()
+	//calc_camera_1st_person()
 
 	//if rl.IsKeyPressed(.ESCAPE) {
 	//	g.run = false
@@ -191,27 +192,21 @@ draw :: proc() {
 	// draw the fling
 	//draw_fling()
 
-	draw_instanced_cube(g.model, []rl.Vector3{
-		{0,0,0},
-		{1,0,0},
-		{0,1,0},
-		{0,0,1},
-	})
-
 	// Draw the player as a small blue sphere
 	
 	// Draw the ideal camera position as a small green sphere
 	//rl.DrawSphere(g.debug.ideal_camera_pos, 0.3, rl.GREEN)
 	//rl.DrawLine3D(g.player.pos, g.debug.ideal_camera_pos, rl.GREEN)
 	// Draw the look target as a small yellow sphere
-	rl.DrawLine3D(g.player.pos, g.player.look_target, rl.YELLOW)
+	//rl.DrawLine3D(g.player.pos, g.player.look_target, rl.YELLOW)
 	//rl.DrawSphere(g.player.look_target, 0.3, rl.YELLOW)
 
 	// simple pbd
 	//pbd_draw_points(g.pbd_world.points)
+	fling_draw_points()
 	pbd_draw_springs(g.pbd_world.springs)
 
-	rl.DrawLine3D(g.player.pbd.Core.position, g.player.pos, rl.RED)
+	//rl.DrawLine3D(g.player.pbd.Core.position, g.player.pos, rl.RED)
 
 	//debug
 	rl.DrawSphere(g.debug.nearest_point, 0.3, rl.RED)
@@ -233,7 +228,7 @@ draw :: proc() {
 	// frame time and frame rate
 	rl.DrawText(fmt.ctprintf("ft: %v\nfps: %v", rl.GetFrameTime(), rl.GetFPS()), 5, 5, 8, rl.WHITE)
 	// distance to ground
-	center := g.fling.Center.position
+	center := g.pbd_world.points[g.fling.center].position
 	_, _, height := get_box_at_position(center)
 	dist := center.y - height
 	rl.DrawText(fmt.ctprintf("dist: %v", dist), 5, 35, 8, rl.WHITE)

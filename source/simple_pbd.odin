@@ -115,10 +115,8 @@ solve_spring :: proc(spring: ^Spring, dts: f32) {
     w0 := point_a.mass > 0.0 ? 1.0 / point_a.mass : 0.0
     w1 := point_b.mass > 0.0 ? 1.0 / point_b.mass : 0.0
     
-    compliance :f32 = 0.002
-    if (g.input_intent.button_y) {
-        compliance = 0.02
-    }
+    compliance :f32 = 0.0005
+    compliance += g.fling.crouch_amount * 0.002
     lambda :f32 = 0.0
     // Calculate compliance scaled by timestep (α̃ = α/h²)
     alpha_tilde := compliance / (dts * dts)
@@ -145,11 +143,12 @@ solve_ground :: proc(point: ^Point, dts: f32) {
     
     if point.position.y < 0 {
         // Set position to ground
-        point.position.y = 0
+        //point.position.y = 0
     }
 
-    if point.position.y < 50 {
+    if point.position.y < -300 && g.fling.center == point.id {
         //reset_player_position(point)
+        restart_fling()
     }
 
     //collision_point, normal := new_grid_collision(point)
