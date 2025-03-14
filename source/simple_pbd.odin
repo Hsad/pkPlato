@@ -148,7 +148,9 @@ solve_ground :: proc(point: ^Point, dts: f32) {
 
     if point.position.y < -300 && g.fling.center == point.id {
         //reset_player_position(point)
-        restart_fling()
+        position := point.position
+        position.y += 600
+        restart_fling(position)
     }
 
     //collision_point, normal := new_grid_collision(point)
@@ -259,16 +261,12 @@ pbd_set_position :: proc(point: ^Point, position: rl.Vector3) {
 }
 
 pbd_create_boxes :: proc(pbd_world: ^PBD_World) {
-    pbd_create_box(pbd_world, {2, 20, 0}, {10, 10, 10}, 1.0)
-    pbd_create_box(pbd_world, {-2, 20, 0}, {10, 10, 10}, 1.0)
-    pbd_create_box(pbd_world, {2, 10, 0}, {5, 5, 5}, 1.0)
-
     for _ in 0..<50 {
-        random_size := f32(rl.GetRandomValue(1, 10))
+        random_size := f32(rl.GetRandomValue(5, 15))
         random_position := rl.Vector3{
-            f32(rl.GetRandomValue(30, 130)), 
-            f32(rl.GetRandomValue(30, 130)), 
-            f32(rl.GetRandomValue(30, 130))}
+            f32(rl.GetRandomValue(0, GRID_LEN*TILE_SIZE)), 
+            f32(rl.GetRandomValue(50, 130)), 
+            f32(rl.GetRandomValue(0, GRID_WIDTH*TILE_SIZE))}
         pbd_create_box(pbd_world, random_position, {random_size, random_size, random_size}, 1.0)
     }
 }

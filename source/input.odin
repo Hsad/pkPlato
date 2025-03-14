@@ -49,11 +49,30 @@ get_input_intent :: proc() {
         g.input_intent.button_y = rl.IsGamepadButtonDown(0, .RIGHT_FACE_UP)
 
 		g.input_intent.bounce = false
-    }
+    } else {
+        g.input_intent.move_x = f32(int(rl.IsKeyDown(.W)) - int(rl.IsKeyDown(.S)))
+        g.input_intent.move_z = f32(int(rl.IsKeyDown(.D)) - int(rl.IsKeyDown(.A)))
 
-    if rl.IsKeyPressed(.SPACE) {
-        g.camera.using_first_person = !g.camera.using_first_person
-    }
+        g.input_intent.look_x = rl.GetMouseDelta().x
+        g.input_intent.look_y = rl.GetMouseDelta().y
+
+        //g.input_intent.right_stick = 
+        //g.input_intent.left_stick = rl.IsMouseButtonDown(.SPACE)
+
+        g.input_intent.trigger_left = f32(int(rl.IsMouseButtonDown(.LEFT)) * 2 - 1)
+        g.input_intent.trigger_right = f32(int(rl.IsMouseButtonDown(.RIGHT)) * 2 - 1)
+
+        g.input_intent.bumper_left = rl.IsKeyPressed(.R)
+        g.input_intent.bumper_right = rl.IsKeyPressed(.T)
+
+        g.input_intent.button_a = rl.IsKeyDown(.E)
+        g.input_intent.button_b = rl.IsKeyPressed(.Q)
+        g.input_intent.button_x = rl.IsKeyDown(.Z)
+        g.input_intent.button_y = rl.IsKeyPressed(.X)
+
+		g.input_intent.bounce = false
+	}
+
 }
 
 /*

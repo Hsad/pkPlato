@@ -29,7 +29,6 @@ package game
 
 import "core:fmt"
 import rl "vendor:raylib"
-import "core:math/ease"
 PIXEL_WINDOW_HEIGHT :: 180
 
 Debug_data :: struct {
@@ -56,18 +55,22 @@ Game_Memory :: struct {
 
 	fling: Fling,
 
-	shader: rl.Shader,
-	material: rl.Material,
-	model: rl.Model,
+	//shader: rl.Shader,
+	//material: rl.Material,
+	//model: rl.Model,
 
 	fuel: f32,
+	player_dead: bool,
+	restart: bool,
+	show_instructions: bool,
 }
 
 g: ^Game_Memory
 
 ui_camera :: proc() -> rl.Camera2D {
 	return {
-		zoom = f32(rl.GetScreenHeight())/PIXEL_WINDOW_HEIGHT,
+		//zoom = f32(rl.GetScreenHeight())/PIXEL_WINDOW_HEIGHT,
+		zoom = 1.0,
 	}
 }
 
@@ -84,14 +87,14 @@ game_init :: proc() {
 
 
 	pbd_world := pbd_init()
-	player_start_pos := rl.Vector3{1, 25, 1}  // Start a bit higher to see if gravity works
+	player_start_pos := rl.Vector3{GRID_LEN*TILE_SIZE, 25, GRID_LEN*TILE_SIZE}  // Start a bit higher to see if gravity works
 	//append(&pbd_world.points, Point{player_start_pos, player_start_pos, {0, 0, 0}, {0, 0, 0}, 1.0, 0})
 	pbd_create_boxes(pbd_world)
 
 	ground_grid := init_ground_grid()
 
 	camera := Camera{
-		using_first_person = true,
+		using_first_person = false,
 		frst_pos = {player_start_pos.x, player_start_pos.y, player_start_pos.z},
 		thrd_pos = {player_start_pos.x - 10, player_start_pos.y + 5, player_start_pos.z},
 	}
@@ -114,12 +117,11 @@ game_init :: proc() {
 
 	fling := create_fling(pbd_world)
 
-	shader, material, model := init_shader()
+	//shader, material, model := init_shader()
 	g^ = Game_Memory {
 		run = true,
 		skip = true,
 		pause = false,
-		fuel = 1000,
 
 		// You can put textures, sounds and music in the `assets` folder. Those
 		// files will be part any release or web build.
@@ -135,13 +137,18 @@ game_init :: proc() {
 		fling = fling,
 
 
-		shader = shader,
-		material = material,
-		model = model,
+		//shader = shader,
+		//material = material,
+		//model = model,
+
+		fuel = 490,
+		player_dead = false,
+		restart = false,
+		show_instructions = true,
 	}
 
 	init_matrices() //for drawing
-
+	init_power_ups()
 	game_hot_reloaded(g)
 }
 
@@ -159,6 +166,7 @@ update :: proc() {
 	}
 	g.skip = false
 
+	check_fuel_pickup()
 
 	//// control look target
 	//hight_change := g.pbd_world.points[0].position.y - g.player.pos.y
@@ -203,13 +211,14 @@ draw :: proc() {
 
 	// simple pbd
 	//pbd_draw_points(g.pbd_world.points)
-	fling_draw_points()
 	pbd_draw_springs(g.pbd_world.springs)
+	fling_draw_points()
+	draw_power_ups()
 
 	//rl.DrawLine3D(g.player.pbd.Core.position, g.player.pos, rl.RED)
 
 	//debug
-	rl.DrawSphere(g.debug.nearest_point, 0.3, rl.RED)
+	//rl.DrawSphere(g.debug.nearest_point, 0.3, rl.RED)
 
 	draw_ground_grid()
 	draw_ground_grid_wire()
@@ -220,24 +229,37 @@ draw :: proc() {
 
 
 	rl.BeginMode2D(ui_camera())
-
+	draw_powerbar()
 	// NOTE: `fmt.ctprintf` uses the temp allocator. The temp allocator is
 	// cleared at the end of the frame by the main application, meaning inside
 	// `main_hot_reload.odin`, `main_release.odin` or `main_web_entry.odin`.
 	//rl.DrawText(fmt.ctprintf("some_number: %v\nplayer_pos: %v", g.some_number, g.player_pos), 5, 5, 8, rl.WHITE)
 	// frame time and frame rate
 	rl.DrawText(fmt.ctprintf("ft: %v\nfps: %v", rl.GetFrameTime(), rl.GetFPS()), 5, 5, 8, rl.WHITE)
-	// distance to ground
-	center := g.pbd_world.points[g.fling.center].position
-	_, _, height := get_box_at_position(center)
-	dist := center.y - height
-	rl.DrawText(fmt.ctprintf("dist: %v", dist), 5, 35, 8, rl.WHITE)
-	rl.DrawText(fmt.ctprintf("fuel: %v", int(g.fuel)), 5, 50, 8, rl.WHITE)
+	rl.DrawText(fmt.ctprintf("fuel: %v", int(g.fuel)), 5, 35, 10, rl.WHITE)
 
-	rl.DrawText(fmt.ctprintf("trigger_left: %v", g.input_intent.trigger_left), 5, 65, 8, rl.WHITE)
-	trig := g.input_intent.trigger_left
-	e := ease.sine_out((trig + 1)/2)
-	rl.DrawText(fmt.ctprintf("ease: %v", e), 5, 80, 8, rl.WHITE)
+
+	if !rl.IsGamepadAvailable(0) {
+		rl.DrawText(fmt.ctprintf("GET A CONTROLLER"), 100, 600, 100, rl.RED)
+	}
+
+	if g.show_instructions {
+		rl.DrawText(fmt.ctprintf("CONTROLS"), 5, 55, 20, rl.WHITE)
+		rl.DrawText(fmt.ctprintf("Sticks to look and move"), 5, 75, 20, rl.WHITE)
+		rl.DrawText(fmt.ctprintf("Both triggers to crouch and jump"), 5, 95, 20, rl.WHITE)
+		rl.DrawText(fmt.ctprintf("Movement in the air burns fuel proportional to your hight from the ground"), 5, 115, 20, rl.WHITE)
+		rl.DrawText(fmt.ctprintf("Moving on the ground is nearly free"), 5, 135, 20, rl.WHITE)
+		rl.DrawText(fmt.ctprintf("Grab powerups to gain more fuel"), 5, 155, 20, rl.WHITE)
+		rl.DrawText(fmt.ctprintf("A lets you float, but burns fuel"), 5, 175, 20, rl.WHITE)
+		rl.DrawText(fmt.ctprintf("LeftBumper Locks fuel Burn"), 5, 195, 20, rl.WHITE)
+		rl.DrawText(fmt.ctprintf("RightBumper 3rd / 1st person"), 5, 215, 20, rl.WHITE)
+
+		rl.DrawText(fmt.ctprintf("Once you've maxed out fuel and turned gold, X, B, and Y give hacks"), 5, 235, 20, rl.WHITE)
+		rl.DrawText(fmt.ctprintf("Start button hides/shows these instructions"), 5, 255, 20, rl.WHITE)
+		rl.DrawText(fmt.ctprintf("back button resets game"), 5, 275, 20, rl.WHITE)
+		rl.DrawText(fmt.ctprintf("Have fun getting launched"), 5, 295, 20, rl.WHITE)
+		rl.DrawText(fmt.ctprintf("If you get flat, unlock fuel and press A"), 5, 315, 20, rl.WHITE)
+	}
 
 	rl.EndMode2D()
 
@@ -319,7 +341,11 @@ game_force_reload :: proc() -> bool {
 
 @(export)
 game_force_restart :: proc() -> bool {
-	return rl.IsKeyPressed(.F6)
+	flag := false
+	if rl.IsGamepadAvailable(0) {
+		flag = rl.IsGamepadButtonPressed(0, .MIDDLE_LEFT)
+	}
+	return rl.IsKeyPressed(.F6) || flag
 }
 
 // In a web build, this is called when browser changes size. Remove the

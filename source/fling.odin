@@ -14,6 +14,7 @@ Fling :: struct {
     look_target: rl.Vector3,
     points: [dynamic]point_idx,
     crouch_amount: f32,
+    fuel_locked: bool,
 }
 Character_Type :: enum {
     Tetrahedron,
@@ -49,7 +50,7 @@ create_fling :: proc(pbd_world: ^PBD_World) -> Fling {
     fmt.println("fling")
 
     fling := Fling{}
-	center := pbd_create_point(pbd_world, rl.Vector3{10, 100, 10})
+	center := pbd_create_point(pbd_world, rl.Vector3{GRID_LEN*TILE_SIZE/2, 100, GRID_LEN*TILE_SIZE/2})
 	fling.points = make([dynamic]point_idx)
 
     if g.fling.character_type == .Tetrahedron {
@@ -74,10 +75,19 @@ simulate_fling :: proc(fling: ^Fling) {
 
     // Update rotation based on look input
     look_sensitivity :: 2.0
-    look_x := g.input_intent.look_x 
-    look_y := g.input_intent.look_y
-    if math.abs(look_x) < 0.3 {look_x = 0}
-    if math.abs(look_y) < 0.3 {look_y = 0}
+    look_x :f32 = 0
+    look_y :f32 = 0
+    if !rl.IsGamepadAvailable(0) { 
+        //mouse look
+        look_x = g.input_intent.look_x * 0.2
+        look_y = g.input_intent.look_y * -0.1
+    } else {
+        //gamepad look
+        look_x = g.input_intent.look_x 
+        look_y = g.input_intent.look_y
+        if math.abs(look_x) < 0.3 {look_x = 0}
+        if math.abs(look_y) < 0.3 {look_y = 0}
+    }
     fling.rotation.y += look_x * -look_sensitivity * rl.GetFrameTime() // Horizontal rotation
     fling.rotation.x += look_y * look_sensitivity * rl.GetFrameTime() // Vertical rotation
 
@@ -123,7 +133,7 @@ simulate_fling :: proc(fling: ^Fling) {
     move_direction := forward * -move_z + right * -move_x
     move_velocity := move_direction * move_speed * ground_mod
 
-    if g.fuel > 0 { // if we have fuel, use it
+    if g.fuel > 1 && !g.fling.fuel_locked { // if we have fuel, use it
         center_point.velocity += move_velocity
 
         move_fuel_cost := linalg.length(move_velocity) * rl.GetFrameTime() * height_from_ground / ground_mod
@@ -135,7 +145,7 @@ simulate_fling :: proc(fling: ^Fling) {
 
         //fmt.println("move_fuel_cost", move_fuel_cost)
         if center_point.position.y > 0 {  // being below ground was giving negative fuel
-            g.fuel -= move_fuel_cost
+            g.fuel -= min(move_fuel_cost, 1)
         }
 
         if g.fuel < 0 {
@@ -146,8 +156,38 @@ simulate_fling :: proc(fling: ^Fling) {
         center_point.velocity += move_velocity / 2 // and move slower
     }
 
+    if center_point.position.y < 0 {
+        g.fuel -= 0.27
+        if g.fuel < 0 {g.fuel = 0}
+    }
 
-    if g.input_intent.button_y && !g.input_previous.button_y {
+    if g.fuel < 50 && linalg.length(move_velocity) < 0.2 {
+        g.fuel += 1 * rl.GetFrameTime() 
+    }
+
+    //if g.fuel == 0 {
+    //    g.player_dead = true
+    //    g.pause = true
+    //}
+
+    if g.restart {
+        restart_fling(g.pbd_world.points[g.fling.center].position, g.pbd_world.points[g.fling.center].prev_pos)
+        g.fuel = 490
+        g.restart = false
+        g.player_dead = false
+        g.pause = false
+    }
+
+    if g.input_intent.bumper_right && !g.input_previous.bumper_right {
+        g.camera.using_first_person = !g.camera.using_first_person
+    }
+
+    if g.input_intent.bumper_left && !g.input_previous.bumper_left {
+        g.fling.fuel_locked = !g.fling.fuel_locked
+    }
+
+
+    if g.input_intent.button_y && !g.input_previous.button_y && g.fuel > 20 * 100 + 100{
         // switch to new solid
         center := pbd_create_point(g.pbd_world, g.pbd_world.points[g.fling.center].position)
         if g.fling.character_type == .Tetrahedron {
@@ -176,14 +216,58 @@ simulate_fling :: proc(fling: ^Fling) {
 
     }
 
-    if g.input_intent.button_b && !g.input_previous.button_b {
+    if g.input_intent.button_b && !g.input_previous.button_b && g.fuel > 20 * 100 + 100{
         g.pause = !g.pause
     }
+
+    if g.input_intent.button_x && g.fuel > 20 * 100 + 10{
+        g.fuel += 10
+    }
+
+    // switch to new solid based on fuel
+    if g.fuel < 4 * 100 + 100 {
+        if g.fling.character_type != .Tetrahedron {
+            g.fling.character_type = .Tetrahedron
+            restart_fling(g.pbd_world.points[g.fling.center].position, g.pbd_world.points[g.fling.center].prev_pos)
+        }
+    } else if g.fuel < 6 * 100 + 100 {
+        if g.fling.character_type != .Cube {
+            g.fling.character_type = .Cube
+            restart_fling(g.pbd_world.points[g.fling.center].position, g.pbd_world.points[g.fling.center].prev_pos)
+        }
+    } else if g.fuel < 8 * 100 + 100 {
+        if g.fling.character_type != .Octahedron {
+            g.fling.character_type = .Octahedron
+            restart_fling(g.pbd_world.points[g.fling.center].position, g.pbd_world.points[g.fling.center].prev_pos)
+        }
+    } else if g.fuel < 12 * 100 + 100 {
+        if g.fling.character_type != .Dodecahedron {
+            g.fling.character_type = .Dodecahedron
+            restart_fling(g.pbd_world.points[g.fling.center].position, g.pbd_world.points[g.fling.center].prev_pos)
+        }
+    } else if g.fuel < 20 * 100 + 100 {
+        if g.fling.character_type != .Icosahedron {
+            g.fling.character_type = .Icosahedron
+            restart_fling(g.pbd_world.points[g.fling.center].position, g.pbd_world.points[g.fling.center].prev_pos)
+        }
+    } 
+
+    if rl.IsGamepadAvailable(0) {
+        //start button
+        if rl.IsGamepadButtonPressed(0, .MIDDLE_RIGHT) {
+            g.show_instructions = !g.show_instructions
+        }
+    }
+
+
+    
 }
 
-restart_fling :: proc() {
-    start := rl.Vector3{10, 100, 10}
+restart_fling :: proc(start: rl.Vector3, prev_pos: rl.Vector3 = {0,0,0}) {
     center := pbd_create_point(g.pbd_world, start)
+    if prev_pos != {0,0,0} {
+        center.prev_pos = prev_pos
+    }
     if g.fling.character_type == .Tetrahedron {
         fmt.println("tetrahedron")
         create_tetrahedron(g.pbd_world, center, &g.fling.points)
@@ -677,10 +761,45 @@ calc_fling_3rd_person :: proc() {
     g.fling.ideal_camera_pos = ideal_camera_pos
 }
 
+fling_color :: proc(n: int) -> rl.Color {
+    switch n {
+    case 0:
+        return rl.RED
+    case 1:
+        return rl.ORANGE
+    case 2:
+        return rl.YELLOW
+    case 3:
+        return rl.BLUE
+    case 4:
+        return rl.DARKGREEN
+    }
+    return rl.WHITE
+}
+
 fling_draw_points :: proc() {
-    rl.DrawSphere(g.pbd_world.points[g.fling.center].position, 0.3, rl.GREEN)
+    color := fling_color(int(g.fling.character_type))
+    if g.fuel > 20* 100 + 100 {
+        color = rl.GOLD
+    }
+    //dark := rl.Color{color.r - color.r/3, color.g - color.g/3, color.b - color.b/3, 100}
+    rl.DrawSphere(g.pbd_world.points[g.fling.center].position, 0.3 * min(1.0, g.fuel / 100), color)
+    //power := int(g.fuel / 100)
+    //for point in 0..<min(len(g.fling.points), power) {
+    //    rl.DrawSphere(g.pbd_world.points[g.fling.points[point]].position, 0.3, color)
+    //}
     for point in g.fling.points {
-        rl.DrawSphere(g.pbd_world.points[point].position, 0.3, rl.GREEN)
+        //rl.DrawSphereWires(g.pbd_world.points[point].position, 0.25, 3, 6, dark)
+        rl.DrawSphere(g.pbd_world.points[point].position, 0.3, color)
+    }
+    // danger
+    if g.fuel < 85{
+        danger := rl.WHITE
+        danger.g = u8(g.fuel - 85) * 3
+        danger.b = u8(g.fuel - 85) * 3
+        for point in g.fling.points {
+            rl.DrawLine3D(g.pbd_world.points[g.fling.center].position, g.pbd_world.points[point].position, danger)
+        }
     }
 }
 

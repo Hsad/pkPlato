@@ -1,6 +1,6 @@
 package game
-import rl "vendor:raylib"
-
+//import rl "vendor:raylib"
+/*
 // Shader initialization function
 init_shader :: proc() -> (rl.Shader, rl.Material, rl.Model) {
     // Load instancing shader
@@ -63,3 +63,4 @@ draw_instanced_cube :: proc(model: rl.Model, positions: []rl.Vector3) {
         rl.DrawMeshInstanced(model.meshes[0], model.materials[0], &transforms[0], instance_count)
     }
 }
+    */

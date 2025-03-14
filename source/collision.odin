@@ -42,8 +42,13 @@ init_ground_grid :: proc() -> Ground_Grid {
     for x in 0..<(r_image.width) {
         for y in 0..<(r_image.height) {
             rl.ImageDrawPixel(&image, x, y, rl.Color{r_pixels[x*y].r, g_pixels[x*y].g, b_pixels[x*y].b, a_pixels[x*y].a})
+            if x == 0 || y == 0 || x == r_image.width-1 || y == r_image.height-1 {
+                rl.ImageDrawPixel(&image, x, y, rl.Color{0,0,0,0})
+
+            }
         }
     }
+
 
     pixels : [^]rl.Color = rl.LoadImageColors(image)
 
