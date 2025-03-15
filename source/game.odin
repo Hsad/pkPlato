@@ -63,6 +63,8 @@ Game_Memory :: struct {
 	player_dead: bool,
 	restart: bool,
 	show_instructions: bool,
+
+	invert_look_y: f32,
 }
 
 g: ^Game_Memory
@@ -145,6 +147,8 @@ game_init :: proc() {
 		player_dead = false,
 		restart = false,
 		show_instructions = true,
+		invert_look_y = 1.0,
+
 	}
 
 	init_matrices() //for drawing
@@ -254,7 +258,7 @@ draw :: proc() {
 		rl.DrawText(fmt.ctprintf("RightBumper 3rd / 1st person"), 5, 215, 20, rl.WHITE)
 
 		rl.DrawText(fmt.ctprintf("Once you've maxed out fuel and turned gold, X, B, and Y give hacks"), 5, 235, 20, rl.WHITE)
-		rl.DrawText(fmt.ctprintf("Start button hides/shows these instructions"), 5, 255, 20, rl.WHITE)
+		rl.DrawText(fmt.ctprintf("Start button hides/shows these instructions, and inverts the camera"), 5, 255, 20, rl.WHITE)
 		rl.DrawText(fmt.ctprintf("back button resets game"), 5, 275, 20, rl.WHITE)
 		rl.DrawText(fmt.ctprintf("Have fun getting launched"), 5, 295, 20, rl.WHITE)
 		rl.DrawText(fmt.ctprintf("If you get flat, unlock fuel and press A"), 5, 315, 20, rl.WHITE)

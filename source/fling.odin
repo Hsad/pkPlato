@@ -89,7 +89,7 @@ simulate_fling :: proc(fling: ^Fling) {
         if math.abs(look_y) < 0.3 {look_y = 0}
     }
     fling.rotation.y += look_x * -look_sensitivity * rl.GetFrameTime() // Horizontal rotation
-    fling.rotation.x += look_y * look_sensitivity * rl.GetFrameTime() // Vertical rotation
+    fling.rotation.x += look_y * g.invert_look_y * look_sensitivity * rl.GetFrameTime() // Vertical rotation
 
     // Clamp vertical rotation to avoid over-rotation
     max_vertical_angle :: math.PI * 0.4 // About 72 degrees up/down
@@ -255,12 +255,13 @@ simulate_fling :: proc(fling: ^Fling) {
     if rl.IsGamepadAvailable(0) {
         //start button
         if rl.IsGamepadButtonPressed(0, .MIDDLE_RIGHT) {
+            if g.show_instructions == false {
+                g.invert_look_y *= -1
+            }
             g.show_instructions = !g.show_instructions
         }
     }
 
-
-    
 }
 
 restart_fling :: proc(start: rl.Vector3, prev_pos: rl.Vector3 = {0,0,0}) {
